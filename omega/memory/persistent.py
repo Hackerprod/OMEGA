@@ -5,7 +5,7 @@ class PersistentMemory:
     NTK-Stabilized Persistent Memory Matrix.
     Stores episodic experiences with protection against catastrophic forgetting.
     """
-    def __init__(self, d_model, capacity=1000, dtype=np.float64):
+    def __init__(self, d_model, capacity=1000, dtype=np.float32):
         self.d = d_model
         self.capacity = capacity
         self.dtype = np.dtype(dtype)

@@ -17,6 +17,7 @@ class TextWindowDataset(BaseDataset):
 
     def __init__(self, loader: TextWindowDataLoader):
         self.loader = loader
+        self.dtype = loader.data.dtype
 
     @classmethod
     def from_config(

@@ -61,6 +61,7 @@ The CLI is the recommended entry point. Every module ships with a JSON config:
 python -m omega.cli.train --module <name> --config configs/<name>.json
 ```
 The CLI loads the config, instantiates the module’s encoder/dataset, and launches the common training loop.
+By default, all configs operate in `float32` for better CPU throughput; switch to `float64` only when you need additional numerical precision.
 
 ### Example – Continuous Text (NLP)
 ```bash

@@ -24,7 +24,12 @@ class OMEGAAgent:
     - Activates Memory and Regime Monitoring.
     """
 
-    def __init__(self, d_model: int = 32, dtype: np.dtype = np.float64):
+    def __init__(
+        self,
+        d_model: int = 32,
+        dtype: np.dtype = np.float32,
+        scsi_log_interval: int = 250,
+    ):
         print("Initializing OMEGA v3 (Integrated & Non-Linear)...")
         self.d = d_model
         self.dtype = np.dtype(dtype)
@@ -37,6 +42,8 @@ class OMEGAAgent:
         self.input_proj = None
         self.memory_recall_threshold = float(np.sqrt(self.d)) * 0.5
         self.memory_decay = 0.995
+        self.scsi_log_interval = max(1, int(scsi_log_interval))
+        self._scsi_event_count = 0
         self._commit_stable_state()
 
     def run_step(self, x_t, x_next, context=None, preprojected: bool = False):
@@ -95,13 +102,15 @@ class OMEGAAgent:
             self.memory.write(refined_post, importance=conf)
             self._commit_stable_state()
         elif scsi_anomaly:
-            metrics = self.regime_detector.last_scsi_metrics
-            angle_deg = np.degrees(metrics.get("angle", 0.0))
-            eig_drift = metrics.get("eig_drift", 0.0)
-            print(
-                f"\n[!] OMEGA: SCSI anomaly detected (angle={angle_deg:.1f}deg, eig-drift={eig_drift:.3f}). "
-                "Reverting to last stable state."
-            )
+            self._scsi_event_count += 1
+            if self._scsi_event_count == 1 or self._scsi_event_count % self.scsi_log_interval == 0:
+                metrics = self.regime_detector.last_scsi_metrics
+                angle_deg = np.degrees(metrics.get("angle", 0.0))
+                eig_drift = metrics.get("eig_drift", 0.0)
+                print(
+                    f"\n[!] OMEGA: SCSI anomaly detected (angle={angle_deg:.1f}deg, eig-drift={eig_drift:.3f}). "
+                    "Reverting to last stable state."
+                )
             self._restore_state(self.stable_state)
             self._commit_stable_state()
         else:
@@ -131,7 +140,7 @@ class OMEGAAgent:
             self._ensure_projection(vector.shape[0])
             if self.input_proj.shape[1] != vector.shape[0]:
                 raise ValueError("Input dimension changed; cannot reuse projection.")
-            return (self.input_proj @ vector).astype(np.float64, copy=False)
+            return (self.input_proj @ vector).astype(self.dtype, copy=False)
         elif arr.ndim == 2:
             if arr.shape[1] == self.d and self.input_proj is None:
                 return arr
@@ -152,7 +161,7 @@ class OMEGAAgent:
             self.input_proj = (rng.standard_normal((self.d, in_dim)) / np.sqrt(in_dim)).astype(self.dtype)
 
     def project_windows(self, windows):
-        windows = np.asarray(windows, dtype=self.dtype)
+        windows = np.asarray(windows, dtype=self.dtype, copy=False)
         if windows.ndim != 3:
             raise ValueError("Expected windows with shape (batch, window, features).")
         batch, window, feat = windows.shape
@@ -161,7 +170,7 @@ class OMEGAAgent:
         return projected.reshape(batch, window, self.d)
 
     def project_batch(self, batch):
-        batch = np.asarray(batch, dtype=self.dtype)
+        batch = np.asarray(batch, dtype=self.dtype, copy=False)
         if batch.ndim == 1:
             return self._project_input(batch)
         if batch.ndim != 2:
@@ -183,6 +192,8 @@ class OMEGAAgent:
         return {
             "d": self.d,
             "dtype": str(self.dtype),
+            "scsi_log_interval": int(self.scsi_log_interval),
+            "scsi_event_count": int(self._scsi_event_count),
             "acp": self.acp.get_state(),
             "layers": [layer.get_state() for layer in self.layers],
             "regime": self.regime_detector.get_state(),
@@ -199,16 +210,21 @@ class OMEGAAgent:
         dtype_str = state.get("dtype")
         if dtype_str is not None:
             self.dtype = np.dtype(dtype_str)
+            self.acp.dtype = self.dtype
         self.acp.set_state(state["acp"])
         for layer, layer_state in zip(self.layers, state["layers"]):
+            layer.dtype = self.dtype
             layer.set_state(layer_state)
         self.regime_detector.set_state(state["regime"])
         self.symbolic_bridge.set_state(state["symbolic"])
+        self.memory.dtype = self.dtype
         self.memory.set_state(state["memory"])
         self.logic_engine.rules = dict(state.get("logic_rules", {}))
         self.input_proj = None if state.get("input_proj") is None else state["input_proj"].copy()
         self.memory_recall_threshold = float(state.get("memory_threshold", self.memory_recall_threshold))
         self.memory_decay = float(state.get("memory_decay", self.memory_decay))
+        self.scsi_log_interval = int(state.get("scsi_log_interval", self.scsi_log_interval))
+        self._scsi_event_count = int(state.get("scsi_event_count", 0))
 
 
 def generate_dynamic_signal(t, d_model=32):
@@ -226,7 +242,7 @@ def build_synthetic_loader(
     batch: int,
     window: int,
     normalize: bool = False,
-    dtype: np.dtype = np.float64,
+    dtype: np.dtype = np.float32,
 ) -> TimeSeriesDataLoader:
     series = np.stack([generate_dynamic_signal(t, d_model) for t in range(steps)], axis=0).astype(dtype, copy=False)
     return TimeSeriesDataLoader(
@@ -268,8 +284,8 @@ def train_agent(
         for windows, targets, meta in _iter_batches(dataset):
             preprojected_batch = bool(meta and meta.get("preprojected"))
             if preprojected_batch:
-                projected_windows = np.asarray(windows)
-                projected_targets = np.asarray(targets)
+                projected_windows = np.asarray(windows, dtype=agent.dtype, copy=False)
+                projected_targets = np.asarray(targets, dtype=agent.dtype, copy=False)
             else:
                 projected_windows = agent.project_windows(windows)
                 projected_targets = agent.project_batch(targets)

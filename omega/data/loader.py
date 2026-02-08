@@ -19,7 +19,7 @@ class TimeSeriesDataLoader:
         shuffle: bool = False,
         normalize: bool = False,
         eps: float = 1e-8,
-        dtype: np.dtype = np.float64,
+        dtype: np.dtype = np.float32,
     ):
         if data.ndim == 1:
             data = data[:, None]

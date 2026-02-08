@@ -23,9 +23,9 @@ class ACPModule:
         basis_budget_ratio=0.5,
         recycle_ratio=0.6,
         min_basis_size=4,
-        compression_backend="svd",
-        randomized_min_dim=48,
-        dtype=np.float64,
+        compression_backend="randomized",
+        randomized_min_dim=32,
+        dtype=np.float32,
     ):
         self.d = d_model
         self.dtype = np.dtype(dtype)
@@ -50,7 +50,9 @@ class ACPModule:
         self.randomized_min_dim = max(4, int(randomized_min_dim))
 
         self.Q = np.random.standard_normal((d_model, 1)).astype(self.dtype)
-        self.Q /= (norm(self.Q) + self._eps)
+        q_norm = self.dtype.type(norm(self.Q) + self._eps)
+        if q_norm > 0:
+            self.Q /= q_norm
         self.k = 1
         self.A = (np.eye(d_model, dtype=self.dtype) * self.dtype.type(0.1)).astype(self.dtype)
         self.P = np.eye(d_model, dtype=self.dtype) / self.dtype.type(max(self.alpha, 1e-6))
@@ -61,7 +63,9 @@ class ACPModule:
         self.last_monotonic_gradient = []
         self.step_counter = 0
         self.power_vector = np.random.standard_normal((d_model, 1)).astype(self.dtype)
-        self.power_vector /= (norm(self.power_vector) + self._eps)
+        pv_norm = self.dtype.type(norm(self.power_vector) + self._eps)
+        if pv_norm > 0:
+            self.power_vector /= pv_norm
         self._spectral_radius = 0.0
         self._calibrate_basis_limits(reallocate=True)
     def _scalar(self, value):
@@ -88,36 +92,37 @@ class ACPModule:
             q_t = self.Q[:, self.k - 1].reshape(-1, 1)
         else:
             norm_x = norm(x_t)
-            q_t = x_t / (norm_x + 1e-8)
+            q_t = x_t / self.dtype.type(norm_x + self._eps)
 
         phi = q_t
-        denom = float(self.rls_lambda + phi.T @ self.P @ phi)
-        gain = (self.P @ phi) / (denom + 1e-8)
+        proj_scalar = (phi.T @ self.P @ phi).item()
+        denom = self.dtype.type(self.rls_lambda + proj_scalar)
+        gain = (self.P @ phi) / self.dtype.type(denom + self._eps)
         error = x_next - self.A @ phi
         self.A += error @ gain.T
 
-        self.P = (self.P - gain @ phi.T @ self.P) / self.rls_lambda
-        self.P += self.alpha * np.eye(self.d, dtype=self.dtype)
+        self.P = (self.P - gain @ phi.T @ self.P) / self.dtype.type(self.rls_lambda)
+        self.P += self.dtype.type(self.alpha) * np.eye(self.d, dtype=self.dtype)
         self.P = 0.5 * (self.P + self.P.T)
 
-        self.A *= (1.0 - self.alpha)
+        self.A *= self.dtype.type(1.0 - self.alpha)
         frob = norm(self.A, ord='fro')
         if frob > self.frobenius_radius:
-            self.A *= self.frobenius_radius / (frob + 1e-8)
+            self.A *= self.dtype.type(self.frobenius_radius / (frob + self._eps))
 
         v_new = self.A @ self.power_vector
         radius_est = norm(v_new)
         if radius_est > 0:
-            self.power_vector = v_new / (radius_est + 1e-8)
+            self.power_vector = v_new / self.dtype.type(radius_est + self._eps)
         self._spectral_radius = float(radius_est)
 
         if self._spectral_radius >= 1.0:
-            self.A *= (0.99 / (self._spectral_radius + 1e-8))
+            self.A *= self.dtype.type(0.99 / (self._spectral_radius + self._eps))
             self._spectral_radius = 0.99
             self.power_vector = self.A @ self.power_vector
             pv_norm = norm(self.power_vector)
             if pv_norm > 0:
-                self.power_vector /= pv_norm
+                self.power_vector /= self.dtype.type(pv_norm + self._eps)
 
         self.A = self.A.astype(self.dtype, copy=False)
         self.P = self.P.astype(self.dtype, copy=False)
@@ -136,7 +141,7 @@ class ACPModule:
             v = np.asarray(seed_vector, dtype=self.dtype).reshape(-1, 1)
             v_norm = norm(v)
             if v_norm > 1e-8:
-                self.Q[:, 0:1] = v / v_norm
+                self.Q[:, 0:1] = (v / self.dtype.type(v_norm + self._eps))
                 self.k = max(self.k, 1)
 
         q_last = self.Q[:, self.k - 1].reshape(-1, 1)
@@ -153,8 +158,8 @@ class ACPModule:
         monotonic_gradients = gradients.tolist()
 
         if h_next > self.tau and self.k < self.k_max:
-            q_new = (w / h_next).flatten()
-            self.Q = np.column_stack([self.Q, q_new]).astype(self.dtype)
+            q_new = (w / self.dtype.type(h_next + self._eps)).flatten()
+            self.Q = self._as_dtype(np.column_stack([self.Q, q_new]))
             self.k += 1
             self.H[:, self.k - 1] = self.dtype.type(0.0)
         elif self.k >= self.k_max:
@@ -331,7 +336,7 @@ class ACPModule:
         self.last_orth_error = deviation_norm
         if deviation_norm > self.orthogonality_tol:
             q_new, _ = qr(self.Q, mode='economic')
-            self.Q = q_new[:, :self.Q.shape[1]]
+            self.Q = self._as_dtype(q_new[:, :self.Q.shape[1]])
 
     @property
     def spectral_radius(self):
@@ -386,7 +391,7 @@ class ACPModule:
         target_dim = min(target_dim, self.k_max)
         if target_dim >= self.k:
             return
-        self.Q = self.Q[:, :target_dim]
+        self.Q = self.Q[:, :target_dim].astype(self.dtype, copy=False)
         self.k = target_dim
         self.H = np.zeros((self.k_max + 1, self.k_max), dtype=self.dtype)
         self.prev_basis = self.Q.copy().astype(self.dtype, copy=False)

@@ -38,15 +38,21 @@ def instantiate_module(module_name: str, config: Dict[str, Any]) -> tuple[BaseEn
 
     dataset_cfg = config.get("dataset", {})
     dataset = dataset_cls.from_config(encoder=encoder, config=dataset_cfg)  # type: ignore[arg-type]
-    dtype_name = dataset_cfg.get("dtype", "float64")
-    dtype_np = np.float32 if dtype_name == "float32" else np.float64
+    dataset_dtype = getattr(dataset, "dtype", None)
+    if dataset_dtype is None:
+        dtype_name = dataset_cfg.get("dtype", "float32")
+        dtype_np = np.float32 if dtype_name == "float32" else np.float64
+    else:
+        dtype_np = np.dtype(dataset_dtype)
     return encoder, dataset, dtype_np
 
 
-def build_agent(config: Dict[str, Any], d_model: int, dtype: np.dtype) -> OMEGAAgent:
+def build_agent(config: Dict[str, Any], dataset: BaseDataset, d_model: int, dtype: np.dtype) -> OMEGAAgent:
     agent_cfg = config.get("agent", {})
     agent_cfg.setdefault("d_model", d_model)
     agent_cfg.setdefault("dtype", dtype)
+    train_cfg = config.get("training", {})
+    agent_cfg.setdefault("scsi_log_interval", int(train_cfg.get("scsi_log_interval", 250)))
     return OMEGAAgent(**agent_cfg)
 
 
@@ -71,7 +77,7 @@ def main(argv: list[str] | None = None) -> None:
         config.setdefault("training", {})["shuffle"] = True
 
     encoder, dataset, dtype_np = instantiate_module(args.module, config)
-    agent = build_agent(config, d_model=encoder.d_model, dtype=dtype_np)
+    agent = build_agent(config, dataset=dataset, d_model=encoder.d_model, dtype=dtype_np)
 
     train_cfg = config.setdefault("training", {})
     epochs = int(train_cfg.get("epochs", 1))

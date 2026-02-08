@@ -42,7 +42,7 @@ class AudioWindowDataset(BaseDataset):
         encoder: ContinuousAudioEncoder,
         config: Dict[str, Any],
     ) -> "AudioWindowDataset":
-        dtype = np.float32 if config.get("dtype", "float64") == "float32" else np.float64
+        dtype = np.float32 if config.get("dtype", "float32") == "float32" else np.float64
         window = int(config.get("window", 16))
         batch_size = int(config.get("batch_size", 4))
         shuffle = bool(config.get("shuffle", False))
@@ -94,8 +94,8 @@ class AudioWindowDataset(BaseDataset):
                 continue
             total_steps = features.shape[0] - self.window
             for step in range(total_steps):
-                window = features[step : step + self.window]
-                target = features[step + self.window]
+                window = features[step : step + self.window].astype(self.dtype, copy=False)
+                target = features[step + self.window].astype(self.dtype, copy=False)
                 self._windows.append(window)
                 self._targets.append(target)
                 self._metadata.append({"clip": clip_idx, "step": step})
