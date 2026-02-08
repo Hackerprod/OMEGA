@@ -1,0 +1,32 @@
+{
+  "module": "nlp",
+  "encoder": {
+    "d_model": 64,
+    "smoothing": 0.2
+  },
+  "dataset": {
+    "text_path": "Corpus/small_corpus.txt",
+    "window": 16,
+    "batch_size": 4,
+    "stride": 1,
+    "shuffle": false,
+    "text_encoding": "utf-8",
+    "max_chars": 50000,
+    "dtype": "float32",
+    "memmap_path": null,
+    "chunk_chars": 65536,
+    "normalize": false
+  },
+  "agent": {
+    "d_model": 64
+  },
+  "training": {
+    "epochs": 1,
+    "shuffle": false,
+    "checkpoint_dir": "checkpoints",
+    "checkpoint_every": 1,
+    "scheduler": {
+      "smooth_factor": 0.2
+    }
+  }
+}

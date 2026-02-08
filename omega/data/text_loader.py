@@ -3,7 +3,10 @@ from pathlib import Path
 from typing import Optional
 
 from omega.data.loader import TimeSeriesDataLoader
-from omega.nlp.continuous import ContinuousTextEncoder
+try:
+    from omega.mods.nlp.encoder import ContinuousTextEncoder
+except ImportError:  # pragma: no cover - backward compatibility
+    from omega.nlp.continuous import ContinuousTextEncoder  # type: ignore
 
 
 class TextWindowDataLoader(TimeSeriesDataLoader):

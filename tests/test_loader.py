@@ -2,7 +2,7 @@ import numpy as np
 
 from omega.data.loader import TimeSeriesDataLoader
 from omega.data.text_loader import TextWindowDataLoader
-from omega.nlp.continuous import ContinuousTextEncoder
+from omega.mods.nlp.encoder import ContinuousTextEncoder
 
 
 def test_timeseries_loader_reuses_buffers():

@@ -30,14 +30,10 @@ from scripts.generate_benchmark_data import (  # type: ignore
     generate_audio,
     generate_text,
 )
-from main import (
-    OMEGAAgent,
-    train_agent,
-    build_synthetic_loader,  # noqa: F401 (imported for completeness)
-)
+from omega.engine.pipeline import OMEGAAgent, train_agent
 from omega.data.loader import TimeSeriesDataLoader
-from omega.data.text_loader import TextWindowDataLoader
-from omega.nlp.continuous import ContinuousTextEncoder
+from omega.mods.nlp.encoder import ContinuousTextEncoder
+from omega.mods.nlp.dataset import TextWindowDataset
 from omega.engine.scheduler import AdaptiveScheduler
 from omega.utils.checkpoint import CheckpointManager
 
@@ -99,17 +95,19 @@ def run_text(profile: Dict[str, Any], dtype: np.dtype) -> Dict[str, Any]:
     text_path = ensure_text(profile)
     encoder = ContinuousTextEncoder(d_model=int(profile["d_model"]), smoothing=0.2)
     memmap_path = GENERATED_DIR / f"text_{profile['name']}.dat"
-    loader = TextWindowDataLoader.from_path(
-        path=str(text_path),
-        encoder=encoder,
-        window=int(profile["window"]),
-        batch_size=int(profile["batch_size"]),
-        stride=int(profile["stride"]),
-        shuffle=False,
-        dtype=dtype,
-        memmap_path=str(memmap_path),
-    )
-    agent = OMEGAAgent(d_model=encoder.d)
+    dataset_cfg = {
+        "text_path": str(text_path),
+        "window": int(profile["window"]),
+        "batch_size": int(profile["batch_size"]),
+        "stride": int(profile["stride"]),
+        "shuffle": False,
+        "dtype": "float32" if dtype == np.float32 else "float64",
+        "memmap_path": str(memmap_path),
+        "normalize": False,
+    }
+    dataset = TextWindowDataset.from_config(encoder, dataset_cfg)
+    loader = dataset.loader
+    agent = OMEGAAgent(d_model=encoder.d_model)
     scheduler = AdaptiveScheduler()
     checkpoint_manager = CheckpointManager(ROOT / "benchmarks" / "tmp_checkpoints")
     start = time.perf_counter()
