@@ -1,0 +1,40 @@
+{
+  "module": "tts_text",
+  "encoder": {
+    "d_model": 64,
+    "smoothing": 0.15,
+    "dtype": "float32"
+  },
+  "dataset": {
+    "manifest_path": "data/tts_manifest.jsonl",
+    "text_field": "text",
+    "audio_field": "audio_path",
+    "base_dir": "data/audio",
+    "max_samples": 32,
+    "sample_rate": 16000,
+    "window": 16,
+    "batch_size": 4,
+    "stride": 1,
+    "shuffle": false,
+    "dtype": "float32",
+    "audio_encoder": {
+      "frame_size": 1024,
+      "hop_size": 256,
+      "smoothing": 0.1
+    }
+  },
+  "agent": {
+    "d_model": 64,
+    "dtype": "float32",
+    "scsi_log_interval": 250
+  },
+  "training": {
+    "epochs": 1,
+    "shuffle": false,
+    "checkpoint_dir": "checkpoints_tts_text",
+    "checkpoint_every": 1,
+    "scheduler": {
+      "smooth_factor": 0.2
+    }
+  }
+}

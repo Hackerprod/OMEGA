@@ -46,7 +46,7 @@ class OMEGAAgent:
         self._scsi_event_count = 0
         self._commit_stable_state()
 
-    def run_step(self, x_t, x_next, context=None, preprojected: bool = False):
+    def run_step(self, x_t, x_next, context=None, preprojected: bool = False, context_preprojected: bool = False):
         if preprojected:
             x_t = np.asarray(x_t, dtype=self.dtype).flatten()
             x_next = np.asarray(x_next, dtype=self.dtype).flatten()
@@ -54,7 +54,10 @@ class OMEGAAgent:
         else:
             x_t = self._project_input(x_t)
             x_next = self._project_input(x_next)
-            context_model = None if context is None else self._project_inputs(context)
+            if context is not None and context_preprojected:
+                context_model = np.asarray(context, dtype=self.dtype)
+            else:
+                context_model = None if context is None else self._project_inputs(context)
 
         z = x_t
         if context_model is not None:
@@ -282,16 +285,41 @@ def train_agent(
             dataset.epoch(shuffle=shuffle)
         epoch_metrics: List[Dict[str, Any]] = []
         for windows, targets, meta in _iter_batches(dataset):
-            preprojected_batch = bool(meta and meta.get("preprojected"))
+            meta = meta or {}
+            preprojected_batch = bool(meta.get("preprojected"))
+            context = meta.get("context")
+            context_preprojected = bool(meta.get("context_preprojected", False))
+
             if preprojected_batch:
                 projected_windows = np.asarray(windows, dtype=agent.dtype, copy=False)
                 projected_targets = np.asarray(targets, dtype=agent.dtype, copy=False)
             else:
                 projected_windows = agent.project_windows(windows)
                 projected_targets = agent.project_batch(targets)
-            for window_t, x_next in zip(projected_windows, projected_targets):
+
+            if context is not None:
+                if context_preprojected:
+                    projected_context = np.asarray(context, dtype=agent.dtype, copy=False)
+                else:
+                    projected_context = agent.project_windows(context)
+            else:
+                projected_context = projected_windows
+                context_preprojected = preprojected_batch
+
+            for window_idx, (window_t, x_next) in enumerate(zip(projected_windows, projected_targets)):
                 x_t = window_t[-1]
-                metrics = agent.run_step(x_t, x_next, context=window_t, preprojected=preprojected_batch)
+                ctx = (
+                    projected_context[window_idx]
+                    if projected_context is not None and projected_context.ndim == 3
+                    else projected_context
+                )
+                metrics = agent.run_step(
+                    x_t,
+                    x_next,
+                    context=ctx,
+                    preprojected=preprojected_batch,
+                    context_preprojected=context_preprojected,
+                )
                 epoch_metrics.append(
                     {
                         "error_pre": float(metrics["error_pre"]),

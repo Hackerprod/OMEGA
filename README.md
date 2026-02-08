@@ -39,11 +39,12 @@ main.py         # Thin wrapper delegating to the CLI
 | Component | Purpose | Version |
 | --- | --- | --- |
 | Python | Runtime | 3.11+ |
-| NumPy | Linear algebra | ≥ 1.24 |
-| SciPy | Signal ops / SVD | ≥ 1.10 |
-| Datasets | Hugging Face loader (TTS) | ≥ 2.18 |
-| SoundFile | Audio decoding (TTS) | ≥ 0.12 |
-| Numba *(optional)* | JIT kernels | ≥ 0.59 |
+| NumPy | Linear algebra | >= 1.24 |
+| SciPy | Signal ops / SVD | >= 1.10 |
+| Datasets | Hugging Face loader (TTS) | >= 2.18 |
+| SoundFile | Audio decoding (TTS) | >= 0.12 |
+| Librosa | Griffin-Lim decoder (text→speech) | >= 0.11 |
+| Numba *(optional)* | JIT kernels | >= 0.59 |
 
 Install via:
 ```bash
@@ -85,6 +86,18 @@ Notes:
 - The config limits the run to the first clips via `max_clips`. Increase this value for deeper experiments.  
 - Requires the optional dependencies `datasets` and `soundfile` listed above.
 
+### Example – Text → Speech Prototype
+```bash
+python -m omega.cli.train \
+  --module tts_text \
+  --config configs/tts_text.json \
+  --epochs 1
+```
+Notes:
+- `configs/tts_text.json` expects a JSONL manifest with `text` and `audio_path` fields. Provide your own paired dataset (e.g. LJSpeech).
+- The encoder converts text to latent trajectories, OMEGA predicts the aligned audio latents, and `GriffinLimDecoder` reconstructs a waveform. Swap the decoder for a neural vocoder to improve quality.
+- Because manifests are user-supplied, the default config points to `data/tts_manifest.jsonl`; adjust these paths before running.
+
 ### Synthetic Benchmark (scripted)
 You can still exercise the raw pipeline without the CLI:
 ```bash
@@ -113,7 +126,7 @@ This uses the shared pipeline functions directly for a quick sanity check.
 ---
 ## Modular Architecture
 - **Core (`omega/core`, `omega/engine`, `omega/brain`, `omega/memory`)** – numerical backbone; modality-agnostic.  
-- **Mods (`omega/mods/<name>`)** – each modality provides encoders/datasets (and optional decoders) built on `BaseEncoder` / `BaseDataset`. Current examples: `nlp` and `tts`.  
+- **Mods (`omega/mods/<name>`)** – each modality provides encoders/datasets (and optional decoders) built on `BaseEncoder` / `BaseDataset`. Current examples: `nlp`, `tts`, and `tts_text`.  
 - **Configs (`configs/<name>.json`)** – describe encoder/dataset/training defaults, including dtypes and checkpoint directories.  
 - **CLI (`omega/cli/train.py`)** – resolves the module via the registry, loads the config, and executes the pipeline.  
 
@@ -168,3 +181,5 @@ This uses the shared pipeline functions directly for a quick sanity check.
 ---
 ## License
 No explicit licence is included. Treat the code as research material; if you reuse substantial portions, credit the “OMEGA v3 – Arnoldi-Causal Projection Prototype” project. 
+
+

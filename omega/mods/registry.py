@@ -4,6 +4,7 @@ from typing import Dict, Any
 
 from omega.mods.nlp import ContinuousTextEncoder, TextWindowDataset
 from omega.mods.tts import ContinuousAudioEncoder, AudioWindowDataset
+from omega.mods.tts_text import TextTrajectoryEncoder, TextSpeechDataset
 
 
 MOD_REGISTRY: Dict[str, Dict[str, Any]] = {
@@ -16,6 +17,11 @@ MOD_REGISTRY: Dict[str, Dict[str, Any]] = {
         "encoder": ContinuousAudioEncoder,
         "dataset": AudioWindowDataset,
         "default_config": "configs/tts.json",
+    },
+    "tts_text": {
+        "encoder": TextTrajectoryEncoder,
+        "dataset": TextSpeechDataset,
+        "default_config": "configs/tts_text.json",
     },
 }
 

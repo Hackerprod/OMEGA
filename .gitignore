@@ -15,3 +15,4 @@ benchmarks/stress_latest.json
 benchmarks/stress_sample.json
 benchmarks/latest_local.json
 checkpoints_tts/
+checkpoints_tts_text/
