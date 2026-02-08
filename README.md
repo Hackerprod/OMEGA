@@ -36,8 +36,9 @@ main.py               # Training / evaluation entry point
 | Component | Version |
 | --- | --- |
 | Python | 3.11 or newer |
-| NumPy | ≥ 1.24 |
-| SciPy | ≥ 1.10 |
+| NumPy | >= 1.24 |
+| SciPy | >= 1.10 |
+| Numba *(optional)* | >= 0.59 |
 
 Install dependencies via:
 
