@@ -174,15 +174,15 @@ class OMEGAAgent:
         self.memory_recall_threshold = float(state.get("memory_threshold", self.memory_recall_threshold))
         self.memory_decay = float(state.get("memory_decay", self.memory_decay))
 
-def generate_dynamic_signal(t):
-    """3D Signal projected to 32D with phase shifts"""
-    proj = np.sin(np.arange(32) * 0.1)
+def generate_dynamic_signal(t, d_model=32):
+    """3D signal projected to d_model dimensions with phase shifts."""
+    proj = np.sin(np.arange(d_model) * 0.1)
     if t < 60:
         val = np.sin(0.1 * t)
     else:
         # High frequency phase shift
         val = 0.5 * np.cos(0.4 * t)
-    return proj * val + np.random.randn(32) * 0.01
+    return proj * val + np.random.randn(d_model) * 0.01
 
 def build_synthetic_loader(
     steps: int,
@@ -306,17 +306,6 @@ def train_agent(
             break
         prev_post = avg_post
     return history
-
-
-def generate_dynamic_signal(t, d_model=32):
-    """3D Signal projected to d_model with phase shifts"""
-    proj = np.sin(np.arange(d_model) * 0.1)
-    if t < 60:
-        val = np.sin(0.1 * t)
-    else:
-        # High frequency phase shift
-        val = 0.5 * np.cos(0.4 * t)
-    return proj * val + np.random.randn(d_model) * 0.01
 
 
 def main():
