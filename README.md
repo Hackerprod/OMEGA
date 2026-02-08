@@ -95,7 +95,9 @@ python -m omega.cli.train \
 ```
 Notes:
 - `configs/tts_text.json` expects a JSONL manifest with `text` and `audio_path` fields. Provide your own paired dataset (e.g. LJSpeech).
-- The encoder converts text to latent trajectories, OMEGA predicts the aligned audio latents, and `GriffinLimDecoder` reconstructs a waveform. Swap the decoder for a neural vocoder to improve quality.
+- The encoder converts text to latent trajectories, OMEGA predicts the aligned audio latents, and `OmegaAudioDecoder` (or the legacy `GriffinLimDecoder`) reconstructs a waveform. Swap the decoder for a neural vocoder to improve quality.
+- Use `--decode-dir <folder>` (optionally `--decoder-state decoder_epoch_xxxx.npz`) to export predicted and target audio after training.
+- The encoder duration heuristics (`vowel_duration`, `consonant_duration`, `pause_duration`) live in the config so you can tune them per corpus.
 - Because manifests are user-supplied, the default config points to `data/tts_manifest.jsonl`; adjust these paths before running.
 
 ### Synthetic Benchmark (scripted)
@@ -181,5 +183,6 @@ This uses the shared pipeline functions directly for a quick sanity check.
 ---
 ## License
 No explicit licence is included. Treat the code as research material; if you reuse substantial portions, credit the “OMEGA v3 – Arnoldi-Causal Projection Prototype” project. 
+
 
 

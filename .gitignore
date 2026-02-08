@@ -16,3 +16,6 @@ benchmarks/stress_sample.json
 benchmarks/latest_local.json
 checkpoints_tts/
 checkpoints_tts_text/
+# Experiments & scripts
+experiments/
+scripts/

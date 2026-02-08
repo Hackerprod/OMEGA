@@ -1,5 +1,5 @@
 from .encoder import TextTrajectoryEncoder
 from .dataset import TextSpeechDataset
-from .decoder import GriffinLimDecoder
+from .decoder import GriffinLimDecoder, OmegaAudioDecoder
 
-__all__ = ["TextTrajectoryEncoder", "TextSpeechDataset", "GriffinLimDecoder"]
+__all__ = ["TextTrajectoryEncoder", "TextSpeechDataset", "GriffinLimDecoder", "OmegaAudioDecoder"]

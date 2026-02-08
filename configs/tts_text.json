@@ -3,7 +3,16 @@
   "encoder": {
     "d_model": 64,
     "smoothing": 0.15,
-    "dtype": "float32"
+    "dtype": "float32",
+    "vowel_duration": 6,
+    "consonant_duration": 3,
+    "pause_duration": 8
+  },
+  "decoder": {
+    "fft_size": 1024,
+    "smoothing": 0.1,
+    "rls_lambda": 0.995,
+    "alpha": 0.001
   },
   "dataset": {
     "manifest_path": "data/tts_manifest.jsonl",

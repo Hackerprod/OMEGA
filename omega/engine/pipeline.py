@@ -47,27 +47,15 @@ class OMEGAAgent:
         self._commit_stable_state()
 
     def run_step(self, x_t, x_next, context=None, preprojected: bool = False, context_preprojected: bool = False):
-        if preprojected:
-            x_t = np.asarray(x_t, dtype=self.dtype).flatten()
-            x_next = np.asarray(x_next, dtype=self.dtype).flatten()
-            context_model = None if context is None else np.asarray(context, dtype=self.dtype)
-        else:
-            x_t = self._project_input(x_t)
-            x_next = self._project_input(x_next)
-            if context is not None and context_preprojected:
-                context_model = np.asarray(context, dtype=self.dtype)
-            else:
-                context_model = None if context is None else self._project_inputs(context)
+        x_t, x_next, context_model = self._prepare_inputs(
+            x_t,
+            x_next,
+            context,
+            preprojected=preprojected,
+            context_preprojected=context_preprojected,
+        )
 
-        z = x_t
-        if context_model is not None:
-            contextual_bias = np.mean(context_model, axis=0)
-            z = 0.7 * z + 0.3 * contextual_bias
-        for layer in self.layers:
-            z = layer.forward(z)
-        raw_pred = z
-
-        refined_pred = self.acp.refine_prediction(raw_pred)
+        refined_pred = self._forward_predict(x_t, context_model)
 
         error_signal = np.linalg.norm(x_next - refined_pred)
         memory_used = False
@@ -128,7 +116,19 @@ class OMEGAAgent:
             "error_post": np.linalg.norm(x_next - refined_post),
             "symbol": symbol_id,
             "memory_used": memory_used,
+            "prediction": refined_post.astype(self.dtype, copy=False),
+            "target": x_next.astype(self.dtype, copy=False),
         }
+
+    def predict_latent(self, x_t, context=None, preprojected: bool = False, context_preprojected: bool = False):
+        x_t, _, context_model = self._prepare_inputs(
+            x_t,
+            x_t,
+            context,
+            preprojected=preprojected,
+            context_preprojected=context_preprojected,
+        )
+        return self._forward_predict(x_t, context_model)
 
     def _project_input(self, vector):
         projected = self._project_inputs(vector)
@@ -162,6 +162,38 @@ class OMEGAAgent:
         else:
             rng = np.random.default_rng()
             self.input_proj = (rng.standard_normal((self.d, in_dim)) / np.sqrt(in_dim)).astype(self.dtype)
+
+    def _prepare_inputs(
+        self,
+        x_t,
+        x_next,
+        context,
+        preprojected: bool = False,
+        context_preprojected: bool = False,
+    ):
+        if preprojected:
+            x_t_proj = np.asarray(x_t, dtype=self.dtype).flatten()
+            x_next_proj = np.asarray(x_next, dtype=self.dtype).flatten()
+            ctx_model = None if context is None else np.asarray(context, dtype=self.dtype)
+        else:
+            x_t_proj = self._project_input(x_t)
+            x_next_proj = self._project_input(x_next)
+            if context is not None and context_preprojected:
+                ctx_model = np.asarray(context, dtype=self.dtype)
+            else:
+                ctx_model = None if context is None else self._project_inputs(context)
+        return x_t_proj, x_next_proj, ctx_model
+
+    def _forward_predict(self, x_t, context_model):
+        z = x_t
+        if context_model is not None:
+            contextual_bias = np.mean(context_model, axis=0)
+            z = 0.7 * z + 0.3 * contextual_bias
+        for layer in self.layers:
+            z = layer.forward(z)
+        raw_pred = z
+        refined_pred = self.acp.refine_prediction(raw_pred)
+        return refined_pred
 
     def project_windows(self, windows):
         windows = np.asarray(windows, dtype=self.dtype, copy=False)

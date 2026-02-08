@@ -44,20 +44,24 @@ class TextSpeechDataset(BaseDataset):
         audio_windows: List[np.ndarray],
         audio_targets: List[np.ndarray],
         text_windows: List[np.ndarray],
+        raw_frames: List[np.ndarray],
         metadata: List[Dict[str, Any]],
         window: int,
         batch_size: int,
         shuffle: bool,
         dtype: np.dtype,
+        audio_encoder: ContinuousAudioEncoder,
     ):
         self.audio_windows = audio_windows
         self.audio_targets = audio_targets
         self.text_windows = text_windows
+        self.raw_frames = raw_frames
         self.metadata = metadata
         self.window = window
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.dtype = np.dtype(dtype)
+        self.audio_encoder = audio_encoder
 
     # ------------------------------------------------------------------ #
     @classmethod
@@ -100,6 +104,7 @@ class TextSpeechDataset(BaseDataset):
         audio_windows: List[np.ndarray] = []
         audio_targets: List[np.ndarray] = []
         text_windows: List[np.ndarray] = []
+        raw_frames: List[np.ndarray] = []
         meta: List[Dict[str, Any]] = []
 
         for idx, sample in enumerate(entries):
@@ -119,6 +124,7 @@ class TextSpeechDataset(BaseDataset):
                 waveform = cls._resample_waveform(waveform, sr, sample_rate)
 
             audio_latents = audio_encoder.encode(waveform)
+            _, frame_buffer, _ = audio_encoder.expand_audio(waveform)
             text_latents = encoder.encode(text)
             if audio_latents.shape[0] <= window or text_latents.shape[0] == 0:
                 continue
@@ -133,6 +139,10 @@ class TextSpeechDataset(BaseDataset):
                 audio_windows.append(a_window.astype(dtype, copy=False))
                 audio_targets.append(a_target.astype(dtype, copy=False))
                 text_windows.append(t_window.astype(dtype, copy=False))
+                if frame_buffer.shape[0] > start + window:
+                    raw_frames.append(frame_buffer[start + window].astype(np.float32, copy=False))
+                else:
+                    raw_frames.append(np.zeros(audio_encoder.frame_size, dtype=np.float32))
                 meta.append({"sample_index": idx, "offset": start})
 
         if not audio_windows:
@@ -142,11 +152,13 @@ class TextSpeechDataset(BaseDataset):
             audio_windows=audio_windows,
             audio_targets=audio_targets,
             text_windows=text_windows,
+            raw_frames=raw_frames,
             metadata=meta,
             window=window,
             batch_size=batch_size,
             shuffle=shuffle,
             dtype=dtype,
+            audio_encoder=audio_encoder,
         )
 
     # ------------------------------------------------------------------ #
@@ -160,11 +172,13 @@ class TextSpeechDataset(BaseDataset):
             a_targets = np.stack([self.audio_targets[i] for i in batch_idx]).astype(self.dtype, copy=False)
             t_windows = np.stack([self.text_windows[i] for i in batch_idx]).astype(self.dtype, copy=False)
             metas = [self.metadata[i] for i in batch_idx]
+            raw = np.stack([self.raw_frames[i] for i in batch_idx]).astype(np.float32, copy=False)
             yield a_windows, a_targets, {
                 "context": t_windows,
                 "preprojected": True,
                 "context_preprojected": True,
                 "metadata": metas,
+                "raw_frames": raw,
             }
 
     def epoch(self, shuffle: bool = False) -> None:
