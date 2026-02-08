@@ -7,3 +7,5 @@ checkpoints/
 *.csv
 *.cmd
 *.log
+sample.txt
+Corpus/small_corpus.txt
