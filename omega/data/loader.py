@@ -19,26 +19,30 @@ class TimeSeriesDataLoader:
         shuffle: bool = False,
         normalize: bool = False,
         eps: float = 1e-8,
+        dtype: np.dtype = np.float64,
     ):
         if data.ndim == 1:
             data = data[:, None]
         if data.ndim != 2:
             raise ValueError("time-series data must be 2D: (steps, features)")
 
-        self.data = data.astype(np.float64)
+        self.data = data.astype(dtype, copy=False)
         self.window = max(1, int(window))
         self.batch_size = max(1, int(batch_size))
         self.stride = max(1, int(stride))
         self.shuffle = shuffle
         self.normalize = normalize
+        self.dtype = self.data.dtype
         self.mean = None
         self.std = None
         if normalize:
-            self.mean = np.mean(self.data, axis=0, keepdims=True)
-            self.std = np.std(self.data, axis=0, keepdims=True)
+            self.mean = np.mean(self.data, axis=0, keepdims=True, dtype=np.float64)
+            self.std = np.std(self.data, axis=0, keepdims=True, dtype=np.float64)
             self.std = np.where(self.std < eps, 1.0, self.std)
-            self.data = (self.data - self.mean) / self.std
+            self.data = ((self.data - self.mean) / self.std).astype(self.dtype, copy=False)
         self.indices = self._compute_indices()
+        self._window_buffer = None
+        self._target_buffer = None
 
     @classmethod
     def from_path(
@@ -50,6 +54,7 @@ class TimeSeriesDataLoader:
         shuffle: bool = False,
         delimiter: str = ",",
         normalize: bool = False,
+        dtype: np.dtype = np.float64,
     ):
         path_obj = Path(path)
         if not path_obj.exists():
@@ -72,6 +77,7 @@ class TimeSeriesDataLoader:
             stride=stride,
             shuffle=shuffle,
             normalize=normalize,
+            dtype=dtype,
         )
 
     @staticmethod
@@ -114,15 +120,17 @@ class TimeSeriesDataLoader:
         total = len(self.indices)
         for start in range(0, total, self.batch_size):
             batch_idx = self.indices[start : start + self.batch_size]
-            windows, targets = [], []
-            for idx in batch_idx:
-                window_slice = self.data[idx : idx + self.window]
-                target = self.data[idx + self.window]
-                windows.append(window_slice)
-                targets.append(target)
-            x_batch = np.stack(windows, axis=0)
-            y_batch = np.stack(targets, axis=0)
-            yield x_batch, y_batch
+            count = len(batch_idx)
+            if self._window_buffer is None or self._window_buffer.shape[0] < count:
+                self._window_buffer = np.empty(
+                    (self.batch_size, self.window, self.data.shape[1]),
+                    dtype=self.dtype,
+                )
+                self._target_buffer = np.empty((self.batch_size, self.data.shape[1]), dtype=self.dtype)
+            for pos, idx in enumerate(batch_idx):
+                self._window_buffer[pos, :, :] = self.data[idx : idx + self.window]
+                self._target_buffer[pos, :] = self.data[idx + self.window]
+            yield self._window_buffer[:count], self._target_buffer[:count]
 
     def epoch(self, shuffle: Optional[bool] = None):
         if shuffle is not None:

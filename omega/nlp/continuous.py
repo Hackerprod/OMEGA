@@ -50,6 +50,61 @@ class ContinuousTextEncoder:
         text = separator.join(lines)
         return self.encode_text(text)
 
+    def encode_file_to_memmap(
+        self,
+        text_path: Path,
+        output_path: Path,
+        encoding: str = "utf-8",
+        chunk_chars: int = 65536,
+        dtype: np.dtype = np.float32,
+        max_chars: Optional[int] = None,
+    ) -> np.memmap:
+        """
+        Encode a text file directly to a memory-mapped matrix to avoid keeping the
+        full corpus in RAM.
+        """
+        text_path = Path(text_path)
+        output_path = Path(output_path)
+        total_chars = 0
+        remaining = max_chars
+        with text_path.open("r", encoding=encoding) as fh:
+            while True:
+                read_size = chunk_chars if remaining is None else min(chunk_chars, remaining)
+                chunk = fh.read(read_size)
+                if not chunk:
+                    break
+                total_chars += len(chunk)
+                if remaining is not None:
+                    remaining -= len(chunk)
+                    if remaining <= 0:
+                        break
+
+        mmap = np.memmap(output_path, mode="w+", dtype=dtype, shape=(total_chars, self.d))
+        prev = np.zeros(self.d, dtype=np.float64)
+        offset = 0
+        remaining = max_chars
+        with text_path.open("r", encoding=encoding) as fh:
+            while True:
+                read_size = chunk_chars if remaining is None else min(chunk_chars, remaining)
+                chunk = fh.read(read_size)
+                if not chunk:
+                    break
+                encoded = self.encode_text(chunk)
+                if encoded.size == 0:
+                    continue
+                # Preserve smoothing continuity across chunks
+                if offset > 0 and encoded.shape[0] > 0:
+                    encoded[0] = (1.0 - self.smoothing) * encoded[0] + self.smoothing * prev
+                mmap[offset : offset + encoded.shape[0]] = encoded.astype(dtype, copy=False)
+                prev = encoded[-1]
+                offset += encoded.shape[0]
+                if remaining is not None:
+                    remaining -= len(chunk)
+                    if remaining <= 0:
+                        break
+        mmap.flush()
+        return mmap
+
 
 class ContinuousTextDecoder:
     """

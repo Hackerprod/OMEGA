@@ -75,8 +75,8 @@ python main.py \
 Key behaviours:
 
 - Numeric CSV files are parsed column-wise; non-numeric columns such as timestamps are ignored automatically.
-- Z-score normalisation is optional but recommended for raw financial data.
-- Sliding windows feed the ACP module; checkpoints are generated per epoch.
+- Z-score normalisation is optional but recommended for raw financial data (combine with --dtype float32 to reduce footprint).
+- Sliding windows feed the ACP module; checkpoints are generated per epoch with batched BLAS-friendly updates.
 
 ### Continuous Text (Token-Free NLP)
 
@@ -91,11 +91,17 @@ python main.py \
   --d-model 32
 ```
 
-Continuous text mode uses `ContinuousTextEncoder` to create smoothed vector trajectories from characters. When dealing with large corpora, limit the number of characters (`--text-max-chars`) or reduce `d_model` to control memory consumption. A decoder back to text is **not** included; integrate your own VQ-VAE or vocoder if generation is required.
+Continuous text mode uses `ContinuousTextEncoder` to create smoothed vector trajectories from characters. When dealing with large corpora, limit the number of characters (`--text-max-chars`), enable `--dtype float32`, or stream directly to a memmap (`--text-memmap`) to control memory consumption. A decoder back to text is **not** included; integra tu propio VQ-VAE o vocoder si necesitas generacion.
+
+### Performance Toolkit
+
+- `python experiments/profile_acp.py --steps 500 --d-model 64 --profile` para obtener tiempos (wall-clock + cProfile) de ACP/DTP.
+- Ajusta `--dtype` y `--text-memmap` en `main.py` para reducir el uso de RAM en experimentos largos.
+- Configura `ACPModule(compression_backend="randomized")` para activar SVD truncado en dimensiones altas.
 
 ## Training Loop and Checkpoints
 
-- **Scheduler:** `omega/engine/scheduler.py` inspects per-epoch statistics (error, gain, spectral radius, orthogonality drift, SCSI metrics) and adjusts RLS regularisation (`alpha`) and decay (`lambda`). Early-stop suggestions are triggered when improvements stagnate.
+- **Scheduler:** `omega/engine/scheduler.py` mantiene medias exponenciales de error/gain/rho, aplica ajustes suaves (`alpha`, `lambda`) y atenua reversiones SCSI antes de disparar rollbacks.
 - **Checkpoints:** Full model state (ACP, layers, regime detector, symbolic bridge, memory, input projection) is saved to `checkpoints/epoch_XXXX.pkl`. Metadata includes the metrics recorded above.
 - **Resume Training:** `python main.py --resume epoch_0007 ...` reloads state and continues from the next epoch.
 - **Metrics Log:** `checkpoints/training_history.json` collects per-epoch summaries (`error_pre`, `error_post`, `gain`, `rho(A)`, SCSI angles/eigenvalues, memory hit rate, alpha, lambda).

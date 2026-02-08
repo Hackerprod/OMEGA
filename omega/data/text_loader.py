@@ -20,6 +20,7 @@ class TextWindowDataLoader(TimeSeriesDataLoader):
         stride: int,
         shuffle: bool,
         normalize: bool = False,
+        dtype: np.dtype = np.float64,
     ):
         super().__init__(
             data=encoded,
@@ -28,6 +29,7 @@ class TextWindowDataLoader(TimeSeriesDataLoader):
             stride=stride,
             shuffle=shuffle,
             normalize=normalize,
+            dtype=dtype,
         )
 
     @classmethod
@@ -42,11 +44,27 @@ class TextWindowDataLoader(TimeSeriesDataLoader):
         encoding: str = "utf-8",
         max_chars: Optional[int] = None,
         normalize: bool = False,
+        dtype: np.dtype = np.float64,
+        memmap_path: Optional[str] = None,
+        chunk_chars: int = 65536,
     ):
-        text = Path(path).read_text(encoding=encoding)
-        if max_chars is not None:
-            text = text[:max_chars]
-        encoded = encoder.encode_text(text)
+        path_obj = Path(path)
+        if memmap_path is not None:
+            memmap_file = Path(memmap_path)
+            mmap = encoder.encode_file_to_memmap(
+                text_path=path_obj,
+                output_path=memmap_file,
+                encoding=encoding,
+                chunk_chars=chunk_chars,
+                dtype=dtype,
+                max_chars=max_chars,
+            )
+            encoded = np.memmap(memmap_file, mode="r", dtype=dtype, shape=mmap.shape)
+        else:
+            text = path_obj.read_text(encoding=encoding)
+            if max_chars is not None:
+                text = text[:max_chars]
+            encoded = encoder.encode_text(text).astype(dtype, copy=False)
         return cls(
             encoded=encoded,
             window=window,
@@ -54,4 +72,5 @@ class TextWindowDataLoader(TimeSeriesDataLoader):
             stride=stride,
             shuffle=shuffle,
             normalize=normalize,
+            dtype=dtype,
         )

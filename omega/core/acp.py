@@ -23,6 +23,8 @@ class ACPModule:
         basis_budget_ratio=0.5,
         recycle_ratio=0.6,
         min_basis_size=4,
+        compression_backend="svd",
+        randomized_min_dim=48,
     ):
         self.d = d_model
         self.k_max = max(1, int(k_max))
@@ -39,6 +41,10 @@ class ACPModule:
         self.recycle_ratio = float(np.clip(recycle_ratio, 0.1, 0.95))
         self.min_basis_size = max(1, int(min_basis_size))
         self._compress_rank_limit = None
+        self.compression_backend = str(compression_backend).lower()
+        if self.compression_backend not in {"svd", "randomized", "qr"}:
+            raise ValueError("compression_backend must be 'svd', 'randomized' or 'qr'.")
+        self.randomized_min_dim = max(4, int(randomized_min_dim))
 
         self.Q = np.random.randn(d_model, 1); self.Q /= (norm(self.Q) + 1e-8)
         self.k = 1
@@ -157,9 +163,38 @@ class ACPModule:
             return None
 
         H_k = self.H[:active_cols + 1, :active_cols]
-        u, s, vt = svd(H_k, full_matrices=False)
         target_cap = self._compress_rank_limit if self._compress_rank_limit is not None else self.k_max // 2
-        target_dim = max(1, min(target_cap, vt.shape[0], self.k_max))
+        backend = self.compression_backend
+        target_dim = max(1, min(target_cap, self.k_max, active_cols))
+
+        if backend == "qr":
+            q_new, _ = qr(self.Q[:, :active_cols], mode='economic')
+            self.Q = q_new[:, :target_dim]
+            self.k = self.Q.shape[1]
+            self.H = np.zeros((self.k_max + 1, self.k_max))
+            basis = self.Q[:, :self.k]
+            spectral_signature = np.linalg.eigvals(basis.T @ (self.A @ basis)) if basis.size else np.array([])
+            return spectral_signature
+
+        if backend == "randomized" and active_cols >= self.randomized_min_dim:
+            try:
+                from scipy.sparse.linalg import svds  # type: ignore
+            except ImportError:
+                u, s, vt = svd(H_k, full_matrices=False)
+            else:
+                rank = min(target_dim, active_cols - 1)
+                if rank >= 1:
+                    u, s, vt = svds(H_k, k=rank)
+                    order = np.argsort(s)[::-1]
+                    u = u[:, order]
+                    s = s[order]
+                    vt = vt[order, :]
+                else:
+                    u, s, vt = svd(H_k, full_matrices=False)
+        else:
+            u, s, vt = svd(H_k, full_matrices=False)
+
+        target_dim = max(1, min(target_dim, vt.shape[0]))
         V_r = vt[:target_dim, :].T  # shape (active_cols, target_dim)
         compressed_basis = self.Q[:, :active_cols] @ V_r
         q_new, _ = qr(compressed_basis, mode='economic')
@@ -222,7 +257,9 @@ class ACPModule:
             "recycle_ratio": float(self.recycle_ratio),
             "min_basis_size": int(self.min_basis_size),
             "k_max": int(self.k_max),
-            "svd_interval": int(self.svd_interval)
+            "svd_interval": int(self.svd_interval),
+            "compression_backend": self.compression_backend,
+            "randomized_min_dim": int(self.randomized_min_dim),
         }
 
     def set_state(self, state):
@@ -258,6 +295,11 @@ class ACPModule:
             self.H = np.zeros((self.k_max + 1, self.k_max))
         self.svd_interval = int(state.get("svd_interval", self.svd_interval))
         self._base_svd_interval = self.svd_interval
+        backend = str(state.get("compression_backend", self.compression_backend)).lower()
+        if backend not in {"svd", "randomized", "qr"}:
+            backend = "svd"
+        self.compression_backend = backend
+        self.randomized_min_dim = int(state.get("randomized_min_dim", self.randomized_min_dim))
         self._calibrate_basis_limits(reallocate=True)
 
     def _enforce_orthogonality(self):

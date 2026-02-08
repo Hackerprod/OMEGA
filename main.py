@@ -37,13 +37,15 @@ class OMEGAAgent:
         self.memory_decay = 0.995
         self._commit_stable_state()
 
-    def run_step(self, x_t, x_next, context=None):
-        x_t = self._project_input(x_t)
-        x_next = self._project_input(x_next)
-        context_model = None
-        if context is not None:
-            context_model = np.stack([self._project_input(vec) for vec in context], axis=0)
-
+    def run_step(self, x_t, x_next, context=None, preprojected=False):
+        if preprojected:
+            x_t = np.asarray(x_t, dtype=np.float64).flatten()
+            x_next = np.asarray(x_next, dtype=np.float64).flatten()
+            context_model = None if context is None else np.asarray(context, dtype=np.float64)
+        else:
+            x_t = self._project_input(x_t)
+            x_next = self._project_input(x_next)
+            context_model = None if context is None else self._project_inputs(context)
         # 1. Forward Pass (Pre-update)
         z = x_t
         if context_model is not None:
@@ -119,19 +121,54 @@ class OMEGAAgent:
         }
     
     def _project_input(self, vector):
-        vector = np.asarray(vector, dtype=np.float64).flatten()
-        if vector.shape[0] == self.d and self.input_proj is None:
-            return vector
-        if self.input_proj is None:
-            in_dim = vector.shape[0]
-            if in_dim == self.d:
-                self.input_proj = np.eye(self.d)
-            else:
-                rng = np.random.default_rng()
-                self.input_proj = rng.standard_normal((self.d, in_dim)) / np.sqrt(in_dim)
-        if self.input_proj.shape[1] != vector.shape[0]:
-            raise ValueError("Input dimension changed; cannot reuse projection.")
-        return self.input_proj @ vector
+        projected = self._project_inputs(vector)
+        return projected if projected.ndim == 1 else projected.flatten()
+
+    def _project_inputs(self, array):
+        arr = np.asarray(array, dtype=np.float64)
+        if arr.ndim == 1:
+            vector = arr.flatten()
+            if vector.shape[0] == self.d and self.input_proj is None:
+                return vector
+            self._ensure_projection(vector.shape[0])
+            if self.input_proj.shape[1] != vector.shape[0]:
+                raise ValueError("Input dimension changed; cannot reuse projection.")
+            return (self.input_proj @ vector).astype(np.float64, copy=False)
+        elif arr.ndim == 2:
+            if arr.shape[1] == self.d and self.input_proj is None:
+                return arr
+            self._ensure_projection(arr.shape[1])
+            if self.input_proj.shape[1] != arr.shape[1]:
+                raise ValueError("Input dimension changed; cannot reuse projection.")
+            return (arr @ self.input_proj.T).astype(np.float64, copy=False)
+        else:
+            raise ValueError("Unsupported input dimensions for projection.")
+
+    def _ensure_projection(self, in_dim):
+        if self.input_proj is not None:
+            return
+        if in_dim == self.d:
+            self.input_proj = np.eye(self.d, dtype=np.float64)
+        else:
+            rng = np.random.default_rng()
+            self.input_proj = rng.standard_normal((self.d, in_dim)) / np.sqrt(in_dim)
+
+    def project_windows(self, windows):
+        windows = np.asarray(windows)
+        if windows.ndim != 3:
+            raise ValueError("Expected windows with shape (batch, window, features).")
+        batch, window, feat = windows.shape
+        flat = windows.reshape(batch * window, feat)
+        projected = self._project_inputs(flat)
+        return projected.reshape(batch, window, self.d)
+
+    def project_batch(self, batch):
+        batch = np.asarray(batch)
+        if batch.ndim == 1:
+            return self._project_input(batch)
+        if batch.ndim != 2:
+            raise ValueError("Batch must be 1D or 2D.")
+        return self._project_inputs(batch)
 
     def _snapshot_state(self):
         """Captures a full system snapshot for structural rollbacks."""
@@ -190,8 +227,9 @@ def build_synthetic_loader(
     batch: int,
     window: int,
     normalize: bool = False,
+    dtype: np.dtype = np.float64,
 ) -> TimeSeriesDataLoader:
-    series = np.stack([generate_dynamic_signal(t, d_model) for t in range(steps)], axis=0)
+    series = np.stack([generate_dynamic_signal(t, d_model) for t in range(steps)], axis=0).astype(dtype, copy=False)
     return TimeSeriesDataLoader(
         series,
         window=window,
@@ -199,29 +237,35 @@ def build_synthetic_loader(
         stride=1,
         shuffle=False,
         normalize=normalize,
+        dtype=dtype,
     )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="OMEGA v3 Trainer")
-    parser.add_argument("--d-model", type=int, default=32, help="Dimensión del modelo OMEGA")
+    parser.add_argument("--d-model", type=int, default=32, help="Dimension del modelo OMEGA")
     parser.add_argument("--data-path", type=str, default=None, help="Ruta a CSV/NPY con serie temporal")
     parser.add_argument("--delimiter", type=str, default=",", help="Delimitador para CSV (por defecto ',')")
-    parser.add_argument("--window", type=int, default=1, help="Tamaño de ventana/contexto para loader")
-    parser.add_argument("--batch-size", type=int, default=1, help="Tamaño de mini-batch en CPU")
+    parser.add_argument("--window", type=int, default=1, help="Tamano de ventana/contexto para loader")
+    parser.add_argument("--batch-size", type=int, default=1, help="Tamano de mini-batch en CPU")
     parser.add_argument("--stride", type=int, default=1, help="Stride de ventana")
-    parser.add_argument("--epochs", type=int, default=1, help="Cantidad de épocas sobre el dataset")
-    parser.add_argument("--steps", type=int, default=200, help="Pasos sintéticos si no hay dataset")
-    parser.add_argument("--shuffle", action="store_true", help="Barajar ventanas en cada época")
-    parser.add_argument("--normalize", action="store_true", help="Normalizar series numéricas (z-score)")
+    parser.add_argument("--epochs", type=int, default=1, help="Cantidad de epocas sobre el dataset")
+    parser.add_argument("--steps", type=int, default=200, help="Pasos sinteticos si no hay dataset")
+    parser.add_argument("--shuffle", action="store_true", help="Barajar ventanas en cada epoca")
+    parser.add_argument("--normalize", action="store_true", help="Normalizar series numericas (z-score)")
     parser.add_argument("--text-path", type=str, default=None, help="Ruta a corpus de texto continuo")
-    parser.add_argument("--text-encoding", type=str, default="utf-8", help="Codificación del archivo de texto")
+    parser.add_argument("--text-encoding", type=str, default="utf-8", help="Codificacion del archivo de texto")
     parser.add_argument("--text-max-chars", type=int, default=None, help="Limitar caracteres cargados del corpus")
     parser.add_argument("--encoder-smoothing", type=float, default=0.2, help="Factor de suavizado temporal del encoder continuo")
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints", help="Directorio para guardar checkpoints")
-    parser.add_argument("--checkpoint-every", type=int, default=1, help="Frecuencia de guardado (épocas)")
-    parser.add_argument("--resume", type=str, default=None, help="Nombre de checkpoint a reanudar (sin extensión)")
+    parser.add_argument("--checkpoint-every", type=int, default=1, help="Frecuencia de guardado (epocas)")
+    parser.add_argument("--resume", type=str, default=None, help="Nombre de checkpoint a reanudar (sin extension)")
+    parser.add_argument("--dtype", type=str, choices=["float64", "float32"], default="float64", help="Precision del loader (float64|float32)")
+    parser.add_argument("--text-memmap", type=str, default=None, help="Ruta de memmap para corpus continuo")
+    parser.add_argument("--text-chunk-size", type=int, default=65536, help="Tamano de bloque para el encoder continuo")
     return parser.parse_args()
+
+
 
 
 def ensure_dir(path: Path):
@@ -244,9 +288,11 @@ def train_agent(
         loader.epoch(shuffle=shuffle)
         epoch_metrics: List[Dict[str, Any]] = []
         for window_batch, y_batch in loader:
-            for window_t, x_next in zip(window_batch, y_batch):
+            projected_windows = agent.project_windows(window_batch)
+            projected_targets = agent.project_batch(y_batch)
+            for window_t, x_next in zip(projected_windows, projected_targets):
                 x_t = window_t[-1]
-                metrics = agent.run_step(x_t, x_next, context=window_t)
+                metrics = agent.run_step(x_t, x_next, context=window_t, preprojected=True)
                 epoch_metrics.append(
                     {
                         "error_pre": float(metrics["error_pre"]),
@@ -313,6 +359,8 @@ def main():
     agent = OMEGAAgent(d_model=args.d_model)
     print()
 
+    dtype = np.float32 if args.dtype == "float32" else np.float64
+
     if args.data_path and args.text_path:
         raise ValueError("Especifique solo --data-path o --text-path, no ambos.")
 
@@ -330,6 +378,9 @@ def main():
             shuffle=args.shuffle,
             encoding=args.text_encoding,
             max_chars=args.text_max_chars,
+            dtype=dtype,
+            memmap_path=args.text_memmap,
+            chunk_chars=args.text_chunk_size,
         )
         print(f"Cargando corpus continuo desde {args.text_path} | pasos disponibles: {loader.data.shape[0]}")
     elif args.data_path:
@@ -341,6 +392,7 @@ def main():
             shuffle=args.shuffle,
             delimiter=args.delimiter,
             normalize=args.normalize,
+            dtype=dtype,
         )
         print(f"Cargando datos desde {args.data_path} | pasos disponibles: {loader.data.shape[0]}")
     else:
@@ -350,8 +402,9 @@ def main():
             batch=args.batch_size,
             window=args.window,
             normalize=args.normalize,
+            dtype=dtype,
         )
-        print(f"Generando serie sintética ({args.steps} pasos) para entrenamiento.")
+        print(f"Generando serie sintetica ({args.steps} pasos) para entrenamiento.")
 
     checkpoint_manager = CheckpointManager(args.checkpoint_dir)
     start_epoch = 0
