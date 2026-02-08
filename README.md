@@ -97,6 +97,7 @@ Continuous text mode uses `ContinuousTextEncoder` to create smoothed vector traj
 
 - `python experiments/profile_acp.py --steps 500 --d-model 64 --profile` para obtener tiempos (wall-clock + cProfile) de ACP/DTP.
 - `python scripts/bench_quick.py --baseline benchmarks/baseline.json` ejecuta el microbench y alerta de regresiones (+25%).
+- `python scripts/run_stress.py --dtype float32` lanza el stress harness (audio/texto) y vuelca resultados a `benchmarks/stress_latest.json`.
 - Ajusta `--dtype` y `--text-memmap` en `main.py` para reducir el uso de RAM en experimentos largos.
 - Configura `ACPModule(compression_backend="randomized")` para activar SVD truncado en dimensiones altas.
 
@@ -106,9 +107,12 @@ Continuous text mode uses `ContinuousTextEncoder` to create smoothed vector traj
 pip install .[dev]
 pytest
 python scripts/bench_quick.py --baseline benchmarks/baseline.json
+python scripts/run_stress.py --dtype float32
 ```
 
 Esto compila el módulo nativo (pybind11) que acelera la iteración de Arnoldi. El CI (`.github/workflows/ci.yml`) recompila la extensión en Linux, ejecuta pruebas unitarias y controla regresiones de rendimiento usando `benchmarks/baseline.json`.
+
+Resultados detallados y evolución histórica: `benchmarks/throughput.md`.
 
 ## Training Loop and Checkpoints
 

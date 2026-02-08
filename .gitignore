@@ -10,3 +10,7 @@ checkpoints/
 sample.txt
 Corpus/small_corpus.txt
 Project_structure.md
+benchmarks/generated/
+benchmarks/stress_latest.json
+benchmarks/stress_sample.json
+benchmarks/latest_local.json

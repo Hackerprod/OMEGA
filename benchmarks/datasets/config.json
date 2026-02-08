@@ -1,0 +1,57 @@
+{
+  "audio": [
+    {
+      "name": "audio_small",
+      "sample_rate": 16000,
+      "duration_seconds": 30,
+      "channels": 1,
+      "window": 64,
+      "stride": 16,
+      "batch_size": 16
+    },
+    {
+      "name": "audio_medium",
+      "sample_rate": 32000,
+      "duration_seconds": 180,
+      "channels": 1,
+      "window": 128,
+      "stride": 32,
+      "batch_size": 32
+    },
+    {
+      "name": "audio_large",
+      "sample_rate": 44100,
+      "duration_seconds": 600,
+      "channels": 2,
+      "window": 256,
+      "stride": 64,
+      "batch_size": 64
+    }
+  ],
+  "text": [
+    {
+      "name": "text_small",
+      "characters": 50000,
+      "window": 32,
+      "stride": 8,
+      "batch_size": 16,
+      "d_model": 64
+    },
+    {
+      "name": "text_medium",
+      "characters": 250000,
+      "window": 64,
+      "stride": 16,
+      "batch_size": 32,
+      "d_model": 96
+    },
+    {
+      "name": "text_large",
+      "characters": 500000,
+      "window": 96,
+      "stride": 16,
+      "batch_size": 48,
+      "d_model": 128
+    }
+  ]
+}
