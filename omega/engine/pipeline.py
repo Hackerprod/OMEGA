@@ -266,11 +266,16 @@ def train_agent(
             dataset.epoch(shuffle=shuffle)
         epoch_metrics: List[Dict[str, Any]] = []
         for windows, targets, meta in _iter_batches(dataset):
-            projected_windows = agent.project_windows(windows)
-            projected_targets = agent.project_batch(targets)
+            preprojected_batch = bool(meta and meta.get("preprojected"))
+            if preprojected_batch:
+                projected_windows = np.asarray(windows)
+                projected_targets = np.asarray(targets)
+            else:
+                projected_windows = agent.project_windows(windows)
+                projected_targets = agent.project_batch(targets)
             for window_t, x_next in zip(projected_windows, projected_targets):
                 x_t = window_t[-1]
-                metrics = agent.run_step(x_t, x_next, context=window_t, preprojected=True)
+                metrics = agent.run_step(x_t, x_next, context=window_t, preprojected=preprojected_batch)
                 epoch_metrics.append(
                     {
                         "error_pre": float(metrics["error_pre"]),

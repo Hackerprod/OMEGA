@@ -1,0 +1,33 @@
+{
+  "module": "tts",
+  "encoder": {
+    "d_model": 64,
+    "frame_size": 1600,
+    "hop_size": 400,
+    "smoothing": 0.15
+  },
+  "dataset": {
+    "dataset_name": "ylacombe/google-colombian-spanish",
+    "dataset_split": "train",
+    "sample_rate": 16000,
+    "max_clips": 32,
+    "window": 16,
+    "batch_size": 4,
+    "stride": 1,
+    "shuffle": false,
+    "dtype": "float32",
+    "normalize": false
+  },
+  "agent": {
+    "d_model": 64
+  },
+  "training": {
+    "epochs": 1,
+    "shuffle": false,
+    "checkpoint_dir": "checkpoints_tts",
+    "checkpoint_every": 1,
+    "scheduler": {
+      "smooth_factor": 0.2
+    }
+  }
+}

@@ -1,189 +1,169 @@
-# OMEGA 
+# OMEGA v3 – Arnoldi-Causal Projection Prototype
 
-## Overview
+OMEGA v3 is a research prototype that explores **Arnoldi-Causal Projection (ACP)** and **local recursive updates** as an alternative to transformer-style sequence models. The system keeps a compact Krylov basis, adjusts its operators via Recursive Least Squares (RLS), and enforces structural stability through Spectral Checksum Structural Identity (SCSI). Everything runs on CPU using NumPy/SciPy; optional accelerators (Numba or native extensions) can be enabled for additional speed.
 
-OMEGA is a research prototype that explores **Arnoldi-Causal Projection (ACP)** and **local recursive learning** as an alternative to transformer-based language and sequence models. The system maintains a compact Krylov subspace, updates operators through Recursive Least Squares (RLS), and enforces structural stability with Spectral Checksum Structural Identity (SCSI). The implementation is CPU-first and relies exclusively on NumPy / SciPy.
+> **Status:** experimental. Expect incomplete features, aggressive logging, and un‑optimised code paths.
 
-> **Status:** Early-stage prototype. Expect missing features, limited benchmarks, and unoptimised numerical routines.
-
-## Core Capabilities
-
-- **Local learning without backpropagation:** Difference Target Propagation (DTP) and RLS updates per layer (`omega/core`).
-- **Spectral stability:** Projection of operators to keep `ρ(A) < 1` and monitoring via SCSI (`omega/core/acp.py`, `omega/brain/regime.py`).
-- **Symbolic hooks:** Competitive prototypes with Lipschitz constraints for neuro-symbolic reasoning (`omega/brain/symbolic.py`).
-- **Persistent memory:** NTK-inspired matrix with uniqueness checks, soft attention reads, and decay (`omega/memory/persistent.py`).
-- **Flexible data ingestion:** Numeric time-series loader with batching/normalisation and token-free continuous NLP encoding (`omega/data`).
-- **Checkpointable training loop:** Adaptive scheduler that tunes `α` and `λ`, plus full-state snapshot/restore (`main.py`).
-
+---
 ## Repository Layout
-
 ```
 omega/
- ├── core/          # ACP/DTP core (modality-agnostic)
- ├── engine/        # Scheduler and training pipeline
- ├── brain/         # Regime detector, symbolic bridge
- ├── memory/        # Persistent memory matrix
- ├── data/          # General-purpose loaders
- ├── mods/          # Vertical modules (NLP, TTS, trading, ...)
- │   ├── base/      # BaseEncoder/BaseDataset interfaces
- │   └── nlp/       # Continuous text encoder/dataset
- ├── cli/           # CLI entry points (`python -m omega.cli.train`)
- └── utils/         # Shared utilities (checkpointing, etc.)
-experiments/        # Benchmarks/demos per module
-configs/            # JSON configs per module
-main.py             # Thin wrapper delegating to `omega.cli.train`
+  core/        # ACP/DTP core (modality-agnostic)
+  engine/      # Training pipeline, scheduler
+  brain/       # Regime detector + symbolic bridge
+  memory/      # Persistent memory matrix
+  data/        # Generic loaders (time-series, text windows)
+  mods/        # Vertical modules (e.g., NLP, TTS)
+    base/      # BaseEncoder / BaseDataset interfaces
+    nlp/       # Continuous text encoder/dataset
+    tts/       # Speech encoder/dataset
+  cli/         # CLI entry points (`python -m omega.cli.train`)
+  utils/       # Shared helpers (checkpoint manager, etc.)
+configs/        # JSON configs per module
+experiments/    # Optional benchmarks / stress tests
+main.py         # Thin wrapper delegating to the CLI
 ```
 
+---
+## Core Capabilities
+- **Local learning without backpropagation:** Difference Target Propagation (DTP) and RLS updates per layer (`omega/core`).  
+- **Spectral stability:** ACP projects operators to keep `ρ(A) < 1` and monitors basis drift with SCSI (`omega/core/acp.py`, `omega/brain/regime.py`).  
+- **Symbolic hooks:** Competitive prototypes with Lipschitz-constrained updates (`omega/brain/symbolic.py`).  
+- **Persistent memory:** NTK-inspired matrix with write uniqueness, soft attention reads, and decay (`omega/memory/persistent.py`).  
+- **Modular front-ends:** Encoders/datasets registered per modality (NLP, TTS, …) under `omega/mods/`.  
+- **Pipeline & CLI:** Shared training loop (`omega/engine/pipeline.py`) and CLI (`omega/cli/train.py`) that load module configs and orchestrate checkpoints.  
+
+---
 ## Requirements
 
-| Component | Version |
-| --- | --- |
-| Python | 3.11 or newer |
-| NumPy | >= 1.24 |
-| SciPy | >= 1.10 |
-| Numba *(optional)* | >= 0.59 |
+| Component | Purpose | Version |
+| --- | --- | --- |
+| Python | Runtime | 3.11+ |
+| NumPy | Linear algebra | ≥ 1.24 |
+| SciPy | Signal ops / SVD | ≥ 1.10 |
+| Datasets | Hugging Face loader (TTS) | ≥ 2.18 |
+| SoundFile | Audio decoding (TTS) | ≥ 0.12 |
+| Numba *(optional)* | JIT kernels | ≥ 0.59 |
 
-Install dependencies via:
-
+Install via:
 ```bash
 python -m venv .venv
-source .venv/Scripts/activate        # Windows PowerShell: .venv\Scripts\Activate.ps1
+source .venv/Scripts/activate      # PowerShell: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
+`requirements.txt` lists the exact packages; remove entries you do not need (e.g., skip `datasets` if you will not run the TTS module).
 
-The provided `requirements.txt` lists the minimum packages needed by the codebase.
-
+---
 ## Quick Start
-
-### Synthetic Benchmark
-
+### Modular CLI
+The CLI is the recommended entry point. Every module ships with a JSON config:
 ```bash
-python main.py --epochs 1 --steps 120
+python -m omega.cli.train --module <name> --config configs/<name>.json
 ```
+The CLI loads the config, instantiates the module’s encoder/dataset, and launches the common training loop.
 
-This generates a sinusoidal signal, trains the agent for one epoch, prints summary metrics, and stores checkpoints under `checkpoints/`.
-
-### Numeric Time Series (e.g., OHLCV)
-
+### Example – Continuous Text (NLP)
 ```bash
-python main.py \
-  --data-path data/btc_live_simulation_30days.csv \
-  --window 16 \
-  --batch-size 8 \
-  --epochs 5 \
-  --shuffle \
-  --normalize
+python -m omega.cli.train \
+  --module nlp \
+  --config configs/nlp.json \
+  --epochs 1 \
+  --shuffle
 ```
+This encodes the configured corpus into continuous trajectories and trains for one epoch. The default config expects you to provide a local text file; adjust the path or max characters as needed.
 
-Key behaviours:
-
-- Numeric CSV files are parsed column-wise; non-numeric columns such as timestamps are ignored automatically.
-- Z-score normalisation is optional but recommended for raw financial data (combine with --dtype float32 to reduce footprint).
-- Sliding windows feed the ACP module; checkpoints are generated per epoch with batched BLAS-friendly updates.
-
-### Continuous Text (Token-Free NLP)
-
+### Example – Speech (TTS, Google Colombian Spanish)
 ```bash
-python main.py \
-  --text-path Corpus/small_corpus.txt \
-  --window 16 \
-  --batch-size 4 \
-  --epochs 2 \
-  --text-max-chars 250000 \
-  --encoder-smoothing 0.2 \
-  --d-model 32
+python -m omega.cli.train \
+  --module tts \
+  --config configs/tts.json \
+  --epochs 1
 ```
+Notes:
+- Uses the Hugging Face dataset `ylacombe/google-colombian-spanish` (downloaded on first use).  
+- The config limits the run to the first clips via `max_clips`. Increase this value for deeper experiments.  
+- Requires the optional dependencies `datasets` and `soundfile` listed above.
 
-Continuous text mode uses `ContinuousTextEncoder` to create smoothed vector trajectories from characters. When dealing with large corpora, limit the number of characters (`--text-max-chars`), enable `--dtype float32`, or stream directly to a memmap (`--text-memmap`) to control memory consumption. A decoder back to text is **not** included; integra tu propio VQ-VAE o vocoder si necesitas generacion.
-
-### Performance Toolkit
-
-- `python experiments/profile_acp.py --steps 500 --d-model 64 --profile` para obtener tiempos (wall-clock + cProfile) de ACP/DTP.
-- `python scripts/bench_quick.py --baseline benchmarks/baseline.json` ejecuta el microbench y alerta de regresiones (+25%).
-- `python scripts/run_stress.py --dtype float32` lanza el stress harness (audio/texto) y vuelca resultados a `benchmarks/stress_latest.json`.
-- Ajusta `--dtype` y `--text-memmap` en `main.py` para reducir el uso de RAM en experimentos largos.
-- Configura `ACPModule(compression_backend="randomized")` para activar SVD truncado en dimensiones altas.
-
-## Deployment & Packaging
-
+### Synthetic Benchmark (scripted)
+You can still exercise the raw pipeline without the CLI:
 ```bash
-pip install .[dev]
-pytest
-python scripts/bench_quick.py --baseline benchmarks/baseline.json
-python scripts/run_stress.py --dtype float32
+python - <<'PY'
+from omega.engine.pipeline import OMEGAAgent, build_synthetic_loader, train_agent
+from omega.engine.scheduler import AdaptiveScheduler
+from omega.utils.checkpoint import CheckpointManager
+
+agent = OMEGAAgent(d_model=32)
+loader = build_synthetic_loader(steps=120, d_model=32, batch=4, window=8)
+scheduler = AdaptiveScheduler()
+history = train_agent(
+    agent,
+    loader,
+    epochs=1,
+    shuffle=False,
+    scheduler=scheduler,
+    checkpoint_manager=CheckpointManager("checkpoints"),
+    checkpoint_every=1,
+)
+print(history)
+PY
 ```
+This uses the shared pipeline functions directly for a quick sanity check.
 
-This build produces the native kernels (pybind11) that speed up the Arnoldi loop. The CI pipeline
-(`.github/workflows/ci.yml`) rebuilds the extension on Linux, runs unit tests, and enforces the
-benchmark guard defined in `benchmarks/baseline.json`.
-
-Detailed timings and historical comparisons live in `benchmarks/throughput.md`.
-
+---
 ## Modular Architecture
+- **Core (`omega/core`, `omega/engine`, `omega/brain`, `omega/memory`)** – numerical backbone; modality-agnostic.  
+- **Mods (`omega/mods/<name>`)** – each modality provides encoders/datasets (and optional decoders) built on `BaseEncoder` / `BaseDataset`. Current examples: `nlp` and `tts`.  
+- **Configs (`configs/<name>.json`)** – describe encoder/dataset/training defaults, including dtypes and checkpoint directories.  
+- **CLI (`omega/cli/train.py`)** – resolves the module via the registry, loads the config, and executes the pipeline.  
 
-- **Core (`omega/core`, `omega/engine`, `omega/memory`, `omega/brain`)**: numerics-only components
-  (ACP, DTP, memory, scheduler). They never depend on modality-specific formats.
-- **Mods (`omega/mods/<name>`):** each modality (NLP, TTS, trading, …) implements encoders/datasets on
-  top of the abstract interfaces in `omega/mods/base`. Current example: `omega/mods/nlp/`.
-- **Experiments (`experiments/<name>/`)**: optional research scripts or benchmarks assembling the
-  agent with custom configs.
-- **CLI (`omega/cli/train.py`)**: shared entry point. Loads a JSON config (`configs/<module>.json`),
-  instantiates the encoder/dataset for that module, and launches `train_agent`.
+### Adding a New Module
+1. Create `omega/mods/<module>/` with classes inheriting `BaseEncoder` / `BaseDataset`.  
+2. Register the module in `omega/mods/registry.py` (optionally point to a default config).  
+3. Provide `configs/<module>.json`.  
+4. (Optional) Add notebooks / scripts in `experiments/<module>/`.  
+5. Launch training: `python -m omega.cli.train --module <module> --config configs/<module>.json`.  
 
-## How to add a module
+---
+## Training Loop & Checkpoints
+- **Scheduler** (`omega/engine/scheduler.py`): keeps exponential moving averages of gain, spectral radius, and orthogonality error; adjusts `alpha`/`lambda` smoothly; reacts to SCSI anomalies before forcing rollbacks.  
+- **Checkpoints**: full agent state serialized to `checkpoints/epoch_XXXX.pkl`. Metadata includes per-epoch metrics so runs are reproducible.  
+- **Resume**: `python -m omega.cli.train --module nlp --config ... --resume epoch_0003`.  
+- **Metrics log**: Each run produces `training_history_<module>.json` with metrics such as `error_pre/post`, `gain`, `ρ(A)`, SCSI angles, memory hit rate, α, λ, etc.  
 
-1. Create `omega/mods/<module>/` and implement subclasses of `BaseEncoder` / `BaseDataset`
-   (optionally `BaseDecoder`).
-2. Register the module in `omega/mods/registry.py` with references to the classes and an optional
-   `default_config`.
-3. Add a base configuration under `configs/<module>.json` describing encoder, dataset, and training
-   defaults (including dtype).
-4. If needed, add demo or benchmark scripts under `experiments/<module>/`.
-5. Launch training with `python -m omega.cli.train --module <module> [--config configs/<module>.json]`.
-6. Provide regression tests that exercise the new encoder/dataset and confirm compatibility with
-   `OMEGAAgent`.
+---
+## Performance & Tooling
+- `experiments/profile_acp.py` – microbenchmark for ACP/DTP kernels (supports cProfile).  
+- `scripts/bench_quick.py` – quick throughput/regression check (compare against `benchmarks/baseline.json`).  
+- `scripts/run_stress.py` – long-form stress test (text/audio). Dumps reports to `benchmarks/stress_latest.json`.  
+- Optional accelerators: set `ACPModule(..., compression_backend="randomized")` or install the native extension under `omega/core/native`.  
+- Use `--dtype float32` and dataset memmaps for large corpora to decrease RAM pressure.  
 
-## Training Loop and Checkpoints
+**Heads-up:** The default logging prints every SCSI anomaly, which can produce a lot of output. Throttle or aggregate the messages before large-scale runs.
 
-- **Scheduler:** `omega/engine/scheduler.py` mantiene medias exponenciales de error/gain/rho, aplica ajustes suaves (`alpha`, `lambda`) y atenua reversiones SCSI antes de disparar rollbacks.
-- **Checkpoints:** Full model state (ACP, layers, regime detector, symbolic bridge, memory, input projection) is saved to `checkpoints/epoch_XXXX.pkl`. Metadata includes the metrics recorded above.
-- **Resume Training:** `python main.py --resume epoch_0007 ...` reloads state and continues from the next epoch.
-- **Metrics Log:** `checkpoints/training_history.json` collects per-epoch summaries (`error_pre`, `error_post`, `gain`, `rho(A)`, SCSI angles/eigenvalues, memory hit rate, alpha, lambda).
-
+---
 ## Roadmap
+1. Continuous decoder (VQ-VAE or other vocoder) to reconstruct audio/text from latent trajectories.  
+2. Streaming encoders to avoid materialising very large corpora in RAM.  
+3. Smarter handling of SCSI alerts (aggregation, telemetry).  
+4. Optimised kernels (Numba/C++/SIMD) for ACP/DTP operations.  
+5. Benchmarks on public datasets (Forex, speech, curated text corpora) with standard metrics (MAE, perceptual scores, semantic coherence).  
+6. Multimodal plug-ins beyond NLP/TTS, plus richer use of the symbolic bridge.  
+7. Cleaner decoding/evaluation pipelines for downstream tasks (topic tracking, intention forecasting, etc.).  
 
-1. **Continuous decoder:** Integrate a VQ-VAE or similar module to reconstruct text/audio from latent trajectories.
-2. **Streaming encoders:** Process corpora in chunks to reduce peak memory usage during continuous encoding.
-3. **SCSI logging:** Aggregate or debounce anomaly notifications to avoid console saturation on long jobs.
-4. **Performance:** Port heavy routines (RLS, SVD/QR) to Numba or C++ to improve throughput on multi-core CPUs.
-5. **Benchmarks:** Evaluate on public datasets (e.g., Forex, speech, curated corpora) with well-defined metrics (MAE, semantic stability).
-6. **Multimodal encoders:** Provide plug-ins for audio/vision embeddings and extend persistent memory to cross-modal cues.
-7. **Decoding pipeline:** Design evaluation protocols for tasks such as intention forecasting, topic shifts, or textual generation using the symbolic bridge.
-
+---
 ## FAQ
+**Is this a transformer replacement?** No. OMEGA focuses on causal identification and stability. Transformers remain superior for large-scale NLP benchmarks.  
+**GPU support?** Not yet. Everything runs on CPU; porting to GPU would require bespoke kernels.  
+**Does it handle large corpora well?** The prototype is CPU-first but still Python-heavy. Expect long runtimes unless you enable the optimised kernels, reduce `k_max`, or use memmapped datasets.  
+**Decoder provided?** No. Generation back to discrete tokens/audio requires an external decoder (e.g., VQ-VAE, diffusion vocoder).  
 
-**Is this a drop-in replacement for transformers?**  
-No. OMEGA demonstrates an alternative learning strategy. It prioritises causal identification and stability, not large-scale token modelling. Transformers remain superior for most state-of-the-art NLP benchmarks.
-
-**Does it support GPU acceleration?**  
-Not currently. All kernels are written in NumPy / SciPy. Porting to GPU would require custom kernels or an accelerated linear algebra backend.
-
-**Can it handle multimodal inputs?**  
-The architecture accepts any continuous vector stream. To operate multimodally, provide encoders for each modality and feed their trajectories through the same training loop. Further integration work is required for production use.
-
-**How does it perform on large corpora?**  
-Processing multi-hundred-megabyte corpora in Python/NumPy is computationally expensive. Expect long runtimes unless encoders and ACP updates are optimised (compiled kernels, reduced `k_max`, increased `svd_interval`, etc.).
-
-**Is there a text/audio decoder?**  
-No. Generation requires an external model to map the learned trajectories back to discrete tokens or waveforms.
-
+---
 ## Contributing
+1. Fork the repo and create a feature branch.  
+2. Document your changes and add unit tests or scripts where relevant.  
+3. Keep checkpoints / history files compatible with the existing format.  
+4. Open a pull request summarising the motivation and results.  
 
-1. Fork the repository and create a feature branch.
-2. Document your changes and add tests or scripts where relevant.
-3. Ensure checkpoints and historical logs remain compatible with your modifications.
-4. Submit a pull request describing the rationale and results.
-
+---
 ## License
-
-No explicit license is included. Treat the code as research material. If you reuse significant portions, credit the “OMEGA – Arnoldi-Causal Projection Prototype” project.
+No explicit licence is included. Treat the code as research material; if you reuse substantial portions, credit the “OMEGA v3 – Arnoldi-Causal Projection Prototype” project. 

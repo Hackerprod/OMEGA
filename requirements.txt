@@ -1,3 +1,5 @@
 numpy>=1.24
 scipy>=1.10
 numba>=0.59
+datasets>=2.18
+soundfile>=0.12

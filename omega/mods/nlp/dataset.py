@@ -44,7 +44,8 @@ class TextWindowDataset(BaseDataset):
 
     def __iter__(self) -> Iterator[Batch]:
         for windows, targets in self.loader:
-            yield windows, targets, None
+            meta = {"preprojected": True}
+            yield windows, targets, meta
 
     def epoch(self, shuffle: bool = False) -> None:
         self.loader.epoch(shuffle=shuffle)
