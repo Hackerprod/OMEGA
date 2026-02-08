@@ -25,8 +25,11 @@ class ACPModule:
         min_basis_size=4,
         compression_backend="svd",
         randomized_min_dim=48,
+        dtype=np.float64,
     ):
         self.d = d_model
+        self.dtype = np.dtype(dtype)
+        self._eps = self.dtype.type(1e-8)
         self.k_max = max(1, int(k_max))
         self.l = decay_lambda
         self.tau = tau
@@ -46,33 +49,40 @@ class ACPModule:
             raise ValueError("compression_backend must be 'svd', 'randomized' or 'qr'.")
         self.randomized_min_dim = max(4, int(randomized_min_dim))
 
-        self.Q = np.random.randn(d_model, 1); self.Q /= (norm(self.Q) + 1e-8)
+        self.Q = np.random.standard_normal((d_model, 1)).astype(self.dtype)
+        self.Q /= (norm(self.Q) + self._eps)
         self.k = 1
-        self.A = np.eye(d_model) * 0.1
-        self.P = np.eye(d_model) / max(self.alpha, 1e-6)
-        self.H = np.zeros((self.k_max + 1, self.k_max))
+        self.A = (np.eye(d_model, dtype=self.dtype) * self.dtype.type(0.1)).astype(self.dtype)
+        self.P = np.eye(d_model, dtype=self.dtype) / self.dtype.type(max(self.alpha, 1e-6))
+        self.H = np.zeros((self.k_max + 1, self.k_max), dtype=self.dtype)
         self.prev_basis = None
         self.scsi_signature = {"eigenvalues": None, "principal_angles": None}
         self.last_orth_error = 0.0
         self.last_monotonic_gradient = []
         self.step_counter = 0
-        self.power_vector = np.random.randn(d_model, 1)
-        self.power_vector /= (norm(self.power_vector) + 1e-8)
+        self.power_vector = np.random.standard_normal((d_model, 1)).astype(self.dtype)
+        self.power_vector /= (norm(self.power_vector) + self._eps)
         self._spectral_radius = 0.0
         self._calibrate_basis_limits(reallocate=True)
+    def _scalar(self, value):
+        return self.dtype.type(value)
+
+    def _as_dtype(self, array):
+        return np.asarray(array, dtype=self.dtype, copy=False)
 
     def refine_prediction(self, raw_pred):
         """
         Projects the raw neural prediction onto the Causal Subspace.
         This filters out components that don't match the learned system dynamics.
         """
-        raw_pred = raw_pred.reshape(-1, 1)
+        raw_pred = np.asarray(raw_pred, dtype=self.dtype).reshape(-1, 1)
         # Project onto Q basis: Q Q^T z
         refined = self.Q @ (self.Q.T @ raw_pred)
         return refined.flatten()
 
     def update_operator(self, x_t, x_next):
-        x_t, x_next = x_t.reshape(-1, 1), x_next.reshape(-1, 1)
+        x_t = np.asarray(x_t, dtype=self.dtype).reshape(-1, 1)
+        x_next = np.asarray(x_next, dtype=self.dtype).reshape(-1, 1)
 
         if self.k > 0:
             q_t = self.Q[:, self.k - 1].reshape(-1, 1)
@@ -87,7 +97,7 @@ class ACPModule:
         self.A += error @ gain.T
 
         self.P = (self.P - gain @ phi.T @ self.P) / self.rls_lambda
-        self.P += self.alpha * np.eye(self.d)
+        self.P += self.alpha * np.eye(self.d, dtype=self.dtype)
         self.P = 0.5 * (self.P + self.P.T)
 
         self.A *= (1.0 - self.alpha)
@@ -109,6 +119,10 @@ class ACPModule:
             if pv_norm > 0:
                 self.power_vector /= pv_norm
 
+        self.A = self.A.astype(self.dtype, copy=False)
+        self.P = self.P.astype(self.dtype, copy=False)
+        self.power_vector = self.power_vector.astype(self.dtype, copy=False)
+
     def step(self, seed_vector=None):
         """
         Updates the causal Krylov basis using the latest transition operator.
@@ -119,7 +133,7 @@ class ACPModule:
         spectral_signature = None
 
         if seed_vector is not None:
-            v = seed_vector.reshape(-1, 1)
+            v = np.asarray(seed_vector, dtype=self.dtype).reshape(-1, 1)
             v_norm = norm(v)
             if v_norm > 1e-8:
                 self.Q[:, 0:1] = v / v_norm
@@ -128,6 +142,9 @@ class ACPModule:
         q_last = self.Q[:, self.k - 1].reshape(-1, 1)
         w_vector = (self.A @ q_last).flatten()
         residual, h_column, gradients = arnoldi_iteration(self.Q, w_vector, self.l, self.k)
+        residual = self._as_dtype(residual)
+        h_column = self._as_dtype(h_column)
+        gradients = self._as_dtype(gradients)
         if h_column.shape[0] >= self.k:
             self.H[:self.k, self.k - 1] = h_column[:self.k]
         h_next = float(h_column[-1]) if h_column.size else 0.0
@@ -137,16 +154,16 @@ class ACPModule:
 
         if h_next > self.tau and self.k < self.k_max:
             q_new = (w / h_next).flatten()
-            self.Q = np.column_stack([self.Q, q_new])
+            self.Q = np.column_stack([self.Q, q_new]).astype(self.dtype)
             self.k += 1
-            self.H[:, self.k - 1] = 0.0
+            self.H[:, self.k - 1] = self.dtype.type(0.0)
         elif self.k >= self.k_max:
             if self.step_counter % self.svd_interval == 0:
                 spectral_signature = self._compress_basis()
             else:
                 monotonic_gradients = [0.0] * self.k
         else:
-            self.H[self.k, self.k - 1] = 0.0
+            self.H[self.k, self.k - 1] = self.dtype.type(0.0)
 
         if self.k >= self.k_max:
             self._conditional_restart(h_next)
@@ -154,6 +171,8 @@ class ACPModule:
         self._enforce_orthogonality()
         self.last_monotonic_gradient = monotonic_gradients
         self._update_scsi(prev_basis, spectral_signature)
+        self.Q = self.Q.astype(self.dtype, copy=False)
+        self.H = self.H.astype(self.dtype, copy=False)
         return self.Q
 
     def _compress_basis(self):
@@ -169,9 +188,9 @@ class ACPModule:
 
         if backend == "qr":
             q_new, _ = qr(self.Q[:, :active_cols], mode='economic')
-            self.Q = q_new[:, :target_dim]
+            self.Q = self._as_dtype(q_new[:, :target_dim])
             self.k = self.Q.shape[1]
-            self.H = np.zeros((self.k_max + 1, self.k_max))
+            self.H = np.zeros((self.k_max + 1, self.k_max), dtype=self.dtype)
             basis = self.Q[:, :self.k]
             spectral_signature = np.linalg.eigvals(basis.T @ (self.A @ basis)) if basis.size else np.array([])
             return spectral_signature
@@ -198,10 +217,10 @@ class ACPModule:
         V_r = vt[:target_dim, :].T  # shape (active_cols, target_dim)
         compressed_basis = self.Q[:, :active_cols] @ V_r
         q_new, _ = qr(compressed_basis, mode='economic')
-        self.Q = q_new[:, :target_dim]
+        self.Q = self._as_dtype(q_new[:, :target_dim])
         self.k = self.Q.shape[1]
         spectral_signature = np.linalg.eigvals(H_k[:target_dim, :target_dim])
-        self.H = np.zeros((self.k_max + 1, self.k_max))
+        self.H = np.zeros((self.k_max + 1, self.k_max), dtype=self.dtype)
         return spectral_signature
 
     def _update_scsi(self, prev_basis, spectral_signature=None):
@@ -264,16 +283,16 @@ class ACPModule:
 
     def set_state(self, state):
         """Restores the ACP state from a snapshot produced by get_state."""
-        self.A = state["A"].copy()
-        self.Q = state["Q"].copy()
-        self.H = state["H"].copy()
-        self.P = state["P"].copy()
+        self.A = self._as_dtype(state["A"].copy())
+        self.Q = self._as_dtype(state["Q"].copy())
+        self.H = self._as_dtype(state["H"].copy())
+        self.P = self._as_dtype(state["P"].copy())
         self.k = int(state["k"])
         self.last_orth_error = float(state.get("last_orth_error", 0.0))
         grad = state.get("last_monotonic_gradient")
         self.last_monotonic_gradient = [] if grad is None else list(np.array(grad, copy=True))
         self.step_counter = int(state.get("step_counter", self.step_counter))
-        self.power_vector = state.get("power_vector", self.power_vector).copy()
+        self.power_vector = self._as_dtype(state.get("power_vector", self.power_vector).copy())
         self._spectral_radius = float(state.get("spectral_radius", self._spectral_radius))
 
         scsi_state = state.get("scsi", {})
@@ -284,7 +303,7 @@ class ACPModule:
             "principal_angles": None if angles is None else np.array(angles, copy=True)
         }
         prev_basis = state.get("prev_basis")
-        self.prev_basis = None if prev_basis is None else prev_basis.copy()
+        self.prev_basis = None if prev_basis is None else self._as_dtype(prev_basis.copy())
         self.adaptive_basis = bool(state.get("adaptive_basis", self.adaptive_basis))
         self.basis_budget_ratio = float(state.get("basis_budget_ratio", self.basis_budget_ratio))
         self.recycle_ratio = float(state.get("recycle_ratio", self.recycle_ratio))
@@ -292,7 +311,7 @@ class ACPModule:
         restored_k_max = int(state.get("k_max", self.k_max))
         if restored_k_max != self.k_max:
             self.k_max = max(1, restored_k_max)
-            self.H = np.zeros((self.k_max + 1, self.k_max))
+            self.H = np.zeros((self.k_max + 1, self.k_max), dtype=self.dtype)
         self.svd_interval = int(state.get("svd_interval", self.svd_interval))
         self._base_svd_interval = self.svd_interval
         backend = str(state.get("compression_backend", self.compression_backend)).lower()
@@ -307,7 +326,7 @@ class ACPModule:
         if self.Q.size == 0:
             return
         gram = self.Q.T @ self.Q
-        deviation = gram - np.eye(self.Q.shape[1])
+        deviation = gram - np.eye(self.Q.shape[1], dtype=self.dtype)
         deviation_norm = norm(deviation, ord='fro')
         self.last_orth_error = deviation_norm
         if deviation_norm > self.orthogonality_tol:
@@ -323,7 +342,7 @@ class ACPModule:
         if not self.adaptive_basis:
             self.k_max = max(1, min(self.k_max, self.d))
             if reallocate:
-                self.H = np.zeros((self.k_max + 1, self.k_max))
+                self.H = np.zeros((self.k_max + 1, self.k_max), dtype=self.dtype)
             self._compress_rank_limit = max(1, min(self.k_max, self.k_max // 2 or 1))
             return
 
@@ -336,7 +355,7 @@ class ACPModule:
         self._compress_rank_limit = min(self._compress_rank_limit, self.k_max)
 
         if needs_realloc or reallocate:
-            new_h = np.zeros((self.k_max + 1, self.k_max))
+            new_h = np.zeros((self.k_max + 1, self.k_max), dtype=self.dtype)
             rows = min(new_h.shape[0], self.H.shape[0])
             cols = min(new_h.shape[1], self.H.shape[1])
             new_h[:rows, :cols] = self.H[:rows, :cols]
@@ -351,6 +370,9 @@ class ACPModule:
         adaptive_interval = max(1, self.k_max // 3)
         base_interval = self._base_svd_interval
         self.svd_interval = max(1, min(base_interval, adaptive_interval if adaptive_interval > 0 else base_interval))
+        self.Q = self.Q.astype(self.dtype, copy=False)
+        if self.prev_basis is not None and self.prev_basis.size:
+            self.prev_basis = self.prev_basis.astype(self.dtype, copy=False)
 
     def _conditional_restart(self, h_next: float):
         """Recycle part of the Krylov basis when growth stalls at the budget frontier."""
@@ -366,5 +388,5 @@ class ACPModule:
             return
         self.Q = self.Q[:, :target_dim]
         self.k = target_dim
-        self.H = np.zeros((self.k_max + 1, self.k_max))
-        self.prev_basis = self.Q.copy()
+        self.H = np.zeros((self.k_max + 1, self.k_max), dtype=self.dtype)
+        self.prev_basis = self.Q.copy().astype(self.dtype, copy=False)

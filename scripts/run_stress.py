@@ -66,7 +66,7 @@ def run_audio(profile: Dict[str, Any], dtype: np.dtype) -> Dict[str, Any]:
         normalize=True,
         dtype=dtype,
     )
-    agent = OMEGAAgent(d_model=series.shape[1])
+    agent = OMEGAAgent(d_model=series.shape[1], dtype=dtype)
     scheduler = AdaptiveScheduler()
     checkpoint_manager = CheckpointManager(ROOT / "benchmarks" / "tmp_checkpoints")
     start = time.perf_counter()
@@ -107,7 +107,7 @@ def run_text(profile: Dict[str, Any], dtype: np.dtype) -> Dict[str, Any]:
     }
     dataset = TextWindowDataset.from_config(encoder, dataset_cfg)
     loader = dataset.loader
-    agent = OMEGAAgent(d_model=encoder.d_model)
+    agent = OMEGAAgent(d_model=encoder.d_model, dtype=dtype)
     scheduler = AdaptiveScheduler()
     checkpoint_manager = CheckpointManager(ROOT / "benchmarks" / "tmp_checkpoints")
     start = time.perf_counter()

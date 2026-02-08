@@ -11,30 +11,33 @@ class LocalPredictiveUnit:
     Each unit also maintains a local causal operator learned via RLS against the global ACP basis.
     """
 
-    def __init__(self, d_in, d_out, rls_lambda=0.99, alpha=1e-3, frobenius_radius=1.0):
+    def __init__(self, d_in, d_out, rls_lambda=0.99, alpha=1e-3, frobenius_radius=1.0, dtype=np.float64):
         self.d_in = d_in
         self.d_out = d_out
         self.rls_lambda = rls_lambda
         self.alpha = alpha
         self.frobenius_radius = frobenius_radius
+        self.dtype = np.dtype(dtype)
 
         # Forward weights
-        self.W = np.random.randn(d_out, d_in) * (1.0 / np.sqrt(d_in))
+        self.W = np.random.standard_normal((d_out, d_in)).astype(self.dtype)
+        self.W *= self.dtype.type(1.0 / np.sqrt(d_in))
         # Inverse/Backward weights (Feedback)
-        self.V = np.random.randn(d_in, d_out) * (1.0 / np.sqrt(d_out))
+        self.V = np.random.standard_normal((d_in, d_out)).astype(self.dtype)
+        self.V *= self.dtype.type(1.0 / np.sqrt(d_out))
         # RLS state for Forward
-        self.P = np.eye(d_in)
+        self.P = np.eye(d_in, dtype=self.dtype)
 
         # Local causal operator (A_L) and covariance
-        self.A_local = np.eye(d_out, d_in)
-        self.P_local = np.eye(d_in) / max(self.alpha, 1e-6)
+        self.A_local = np.eye(d_out, d_in, dtype=self.dtype)
+        self.P_local = np.eye(d_in, dtype=self.dtype) / self.dtype.type(max(self.alpha, 1e-6))
 
         self.last_x = None
         self.last_z_pre = None  # Pre-activation
         self.last_z = None  # Post-activation
 
     def forward(self, x):
-        self.last_x = x.reshape(-1, 1)
+        self.last_x = np.asarray(x, dtype=self.dtype).reshape(-1, 1)
         self.last_z_pre = self.W @ self.last_x
         self.last_z = np.tanh(self.last_z_pre)
         return self.last_z.flatten()
@@ -45,7 +48,7 @@ class LocalPredictiveUnit:
         Target_x = last_x + V(target_z) - V(last_z)
         This ensures the target respects the local non-linear mapping.
         """
-        target_z = target_z.reshape(-1, 1)
+        target_z = np.asarray(target_z, dtype=self.dtype).reshape(-1, 1)
         # Compute the target for the layer below
         delta_x = self.V @ target_z - self.V @ self.last_z
         target_x = self.last_x + delta_x
@@ -55,7 +58,7 @@ class LocalPredictiveUnit:
         """
         Updates Forward weights (W), Backward weights (V), and the local causal operator A_L.
         """
-        target_z = target_z.reshape(-1, 1)
+        target_z = np.asarray(target_z, dtype=self.dtype).reshape(-1, 1)
 
         # 1. Update Forward W (using RLS on the linear part to reach atanh(target_z))
         target_z_clipped = np.clip(target_z, -0.99, 0.99)
@@ -80,7 +83,7 @@ class LocalPredictiveUnit:
             self.A_local += err_local @ k_gain.T
 
             self.P_local = (self.P_local - k_gain @ phi.T @ self.P_local) / self.rls_lambda
-            self.P_local += self.alpha * np.eye(self.d_in)
+            self.P_local += self.alpha * np.eye(self.d_in, dtype=self.dtype)
             self.P_local = 0.5 * (self.P_local + self.P_local.T)
 
             # Regularize A_L

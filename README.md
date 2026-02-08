@@ -20,18 +20,18 @@ OMEGA is a research prototype that explores **Arnoldi-Causal Projection (ACP)** 
 ```
 omega/
  ├── core/          # ACP/DTP core (modality-agnostic)
- ├── engine/        # Scheduler, pipeline de entrenamiento
+ ├── engine/        # Scheduler and training pipeline
  ├── brain/         # Regime detector, symbolic bridge
  ├── memory/        # Persistent memory matrix
- ├── data/          # Loaders genéricos
- ├── mods/          # Módulos verticales (NLP, TTS, trading, ...)
- │   ├── base/      # Interfaces BaseEncoder/BaseDataset
- │   └── nlp/       # Encoder/loader continuo para texto
- ├── cli/           # CLI (`python -m omega.cli.train`)
- └── utils/         # Utilidades (checkpoints, etc.)
-experiments/        # Scripts de benchmark por módulo
-configs/            # Configs JSON para cada módulo
-main.py             # Wrapper que llama a `omega.cli.train`
+ ├── data/          # General-purpose loaders
+ ├── mods/          # Vertical modules (NLP, TTS, trading, ...)
+ │   ├── base/      # BaseEncoder/BaseDataset interfaces
+ │   └── nlp/       # Continuous text encoder/dataset
+ ├── cli/           # CLI entry points (`python -m omega.cli.train`)
+ └── utils/         # Shared utilities (checkpointing, etc.)
+experiments/        # Benchmarks/demos per module
+configs/            # JSON configs per module
+main.py             # Thin wrapper delegating to `omega.cli.train`
 ```
 
 ## Requirements
@@ -113,25 +113,35 @@ python scripts/bench_quick.py --baseline benchmarks/baseline.json
 python scripts/run_stress.py --dtype float32
 ```
 
-Esto compila el módulo nativo (pybind11) que acelera la iteración de Arnoldi. El CI (`.github/workflows/ci.yml`) recompila la extensión en Linux, ejecuta pruebas unitarias y controla regresiones de rendimiento usando `benchmarks/baseline.json`.
+This build produces the native kernels (pybind11) that speed up the Arnoldi loop. The CI pipeline
+(`.github/workflows/ci.yml`) rebuilds the extension on Linux, runs unit tests, and enforces the
+benchmark guard defined in `benchmarks/baseline.json`.
 
-Resultados detallados y evolución histórica: `benchmarks/throughput.md`.
+Detailed timings and historical comparisons live in `benchmarks/throughput.md`.
 
 ## Modular Architecture
 
-- **Core (`omega/core`, `omega/engine`, `omega/memory`, `omega/brain`)**: Núcleo puramente numérico (ACP, DTP, memoria, scheduler). No depende de formatos de datos ni modalidades.
-- **Mods (`omega/mods/<nombre>`):** Cada modalidad implementa sus encoders/datasets/decoders sobre las interfaces de `omega/mods/base`. Ejemplo actual: `omega/mods/nlp/`.
-- **Experiments (`experiments/<nombre_mod>/`)**: Scripts específicos de investigación/benchmark que ensamblan agentes con configuraciones personalizadas.
-- **CLI (`omega/cli/train.py`)**: Punto de entrada común. Carga la configuración JSON (`configs/<mod>.json`), crea el encoder/dataset del módulo y ejecuta `train_agent`.
+- **Core (`omega/core`, `omega/engine`, `omega/memory`, `omega/brain`)**: numerics-only components
+  (ACP, DTP, memory, scheduler). They never depend on modality-specific formats.
+- **Mods (`omega/mods/<name>`):** each modality (NLP, TTS, trading, …) implements encoders/datasets on
+  top of the abstract interfaces in `omega/mods/base`. Current example: `omega/mods/nlp/`.
+- **Experiments (`experiments/<name>/`)**: optional research scripts or benchmarks assembling the
+  agent with custom configs.
+- **CLI (`omega/cli/train.py`)**: shared entry point. Loads a JSON config (`configs/<module>.json`),
+  instantiates the encoder/dataset for that module, and launches `train_agent`.
 
 ## How to add a module
 
-1. Crear `omega/mods/<nuevo>/` con las clases que extiendan `BaseEncoder` y `BaseDataset` (y `BaseDecoder` si aplica).
-2. Registrar el módulo en `omega/mods/registry.py` con referencias a las clases y, opcionalmente, a un `default_config`.
-3. Añadir la configuración base en `configs/<nuevo>.json` (encoder, dataset, entrenamiento).
-4. Si procede, crear scripts en `experiments/<nuevo>/` para benchmarks o demos.
-5. Invocar el entrenamiento con `python -m omega.cli.train --module <nuevo> [--config configs/<nuevo>.json]`.
-6. Añadir pruebas (unitarias o de integración) que instancien el encoder/dataset y garanticen compatibilidad con `OMEGAAgent`.
+1. Create `omega/mods/<module>/` and implement subclasses of `BaseEncoder` / `BaseDataset`
+   (optionally `BaseDecoder`).
+2. Register the module in `omega/mods/registry.py` with references to the classes and an optional
+   `default_config`.
+3. Add a base configuration under `configs/<module>.json` describing encoder, dataset, and training
+   defaults (including dtype).
+4. If needed, add demo or benchmark scripts under `experiments/<module>/`.
+5. Launch training with `python -m omega.cli.train --module <module> [--config configs/<module>.json]`.
+6. Provide regression tests that exercise the new encoder/dataset and confirm compatibility with
+   `OMEGAAgent`.
 
 ## Training Loop and Checkpoints
 

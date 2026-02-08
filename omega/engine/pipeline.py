@@ -24,25 +24,26 @@ class OMEGAAgent:
     - Activates Memory and Regime Monitoring.
     """
 
-    def __init__(self, d_model: int = 32):
+    def __init__(self, d_model: int = 32, dtype: np.dtype = np.float64):
         print("Initializing OMEGA v3 (Integrated & Non-Linear)...")
         self.d = d_model
-        self.acp = ACPModule(d_model)
-        self.layers = [LocalPredictiveUnit(d_model, d_model) for _ in range(2)]
+        self.dtype = np.dtype(dtype)
+        self.acp = ACPModule(d_model, dtype=self.dtype)
+        self.layers = [LocalPredictiveUnit(d_model, d_model, dtype=self.dtype) for _ in range(2)]
         self.regime_detector = RegimeDetector(d_model, window_size=15, threshold=1.8)
         self.symbolic_bridge = SymbolicInterface(d_model, n_predicates=20)
-        self.memory = PersistentMemory(d_model)
+        self.memory = PersistentMemory(d_model, dtype=self.dtype)
         self.logic_engine = LogicEngine()
         self.input_proj = None
-        self.memory_recall_threshold = np.sqrt(self.d) * 0.5
+        self.memory_recall_threshold = float(np.sqrt(self.d)) * 0.5
         self.memory_decay = 0.995
         self._commit_stable_state()
 
     def run_step(self, x_t, x_next, context=None, preprojected: bool = False):
         if preprojected:
-            x_t = np.asarray(x_t, dtype=np.float64).flatten()
-            x_next = np.asarray(x_next, dtype=np.float64).flatten()
-            context_model = None if context is None else np.asarray(context, dtype=np.float64)
+            x_t = np.asarray(x_t, dtype=self.dtype).flatten()
+            x_next = np.asarray(x_next, dtype=self.dtype).flatten()
+            context_model = None if context is None else np.asarray(context, dtype=self.dtype)
         else:
             x_t = self._project_input(x_t)
             x_next = self._project_input(x_next)
@@ -122,7 +123,7 @@ class OMEGAAgent:
         return projected if projected.ndim == 1 else projected.flatten()
 
     def _project_inputs(self, array):
-        arr = np.asarray(array, dtype=np.float64)
+        arr = np.asarray(array, dtype=self.dtype)
         if arr.ndim == 1:
             vector = arr.flatten()
             if vector.shape[0] == self.d and self.input_proj is None:
@@ -137,7 +138,7 @@ class OMEGAAgent:
             self._ensure_projection(arr.shape[1])
             if self.input_proj.shape[1] != arr.shape[1]:
                 raise ValueError("Input dimension changed; cannot reuse projection.")
-            return (arr @ self.input_proj.T).astype(np.float64, copy=False)
+            return (arr @ self.input_proj.T).astype(self.dtype, copy=False)
         else:
             raise ValueError("Unsupported input dimensions for projection.")
 
@@ -145,13 +146,13 @@ class OMEGAAgent:
         if self.input_proj is not None:
             return
         if in_dim == self.d:
-            self.input_proj = np.eye(self.d, dtype=np.float64)
+            self.input_proj = np.eye(self.d, dtype=self.dtype)
         else:
             rng = np.random.default_rng()
-            self.input_proj = rng.standard_normal((self.d, in_dim)) / np.sqrt(in_dim)
+            self.input_proj = (rng.standard_normal((self.d, in_dim)) / np.sqrt(in_dim)).astype(self.dtype)
 
     def project_windows(self, windows):
-        windows = np.asarray(windows)
+        windows = np.asarray(windows, dtype=self.dtype)
         if windows.ndim != 3:
             raise ValueError("Expected windows with shape (batch, window, features).")
         batch, window, feat = windows.shape
@@ -160,7 +161,7 @@ class OMEGAAgent:
         return projected.reshape(batch, window, self.d)
 
     def project_batch(self, batch):
-        batch = np.asarray(batch)
+        batch = np.asarray(batch, dtype=self.dtype)
         if batch.ndim == 1:
             return self._project_input(batch)
         if batch.ndim != 2:
@@ -181,6 +182,7 @@ class OMEGAAgent:
     def get_state(self):
         return {
             "d": self.d,
+            "dtype": str(self.dtype),
             "acp": self.acp.get_state(),
             "layers": [layer.get_state() for layer in self.layers],
             "regime": self.regime_detector.get_state(),
@@ -194,6 +196,9 @@ class OMEGAAgent:
 
     def set_state(self, state: Dict[str, Any]):
         self.d = state.get("d", self.d)
+        dtype_str = state.get("dtype")
+        if dtype_str is not None:
+            self.dtype = np.dtype(dtype_str)
         self.acp.set_state(state["acp"])
         for layer, layer_state in zip(self.layers, state["layers"]):
             layer.set_state(layer_state)
