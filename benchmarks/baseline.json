@@ -1,0 +1,6 @@
+{
+  "acp.step": 2.0,
+  "acp.update_operator": 0.05,
+  "lpu.forward": 0.05,
+  "lpu.local_update": 0.08
+}

@@ -15,8 +15,15 @@ try:
 except ImportError:  # pragma: no cover - numba is optional
     njit = None  # type: ignore[assignment]
 
+try:
+    from omega.core import native as native_mod
+except ImportError:  # pragma: no cover
+    native_mod = None
+
 
 NUMBA_AVAILABLE = njit is not None
+NATIVE_AVAILABLE = native_mod.has_native() if native_mod is not None else False
+_NATIVE_KERNELS = native_mod.load_kernels() if NATIVE_AVAILABLE else None
 
 
 def _arnoldi_python(Q: np.ndarray, w: np.ndarray, decay: float, k: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -89,6 +96,16 @@ def arnoldi_iteration(Q: np.ndarray, w: np.ndarray, decay: float, k: int) -> tup
         h_column = np.zeros(1, dtype=w.dtype)
         gradients = np.zeros(0, dtype=w.dtype)
         return w, h_column, gradients
+
+    if NATIVE_AVAILABLE:
+        Q_compact = np.ascontiguousarray(Q[:, :k])
+        w_vec = np.ascontiguousarray(w)
+        residual, h_col, grad = _NATIVE_KERNELS.arnoldi_iteration(Q_compact, w_vec, float(decay), int(k))
+        return (
+            np.array(residual, dtype=w.dtype, copy=False),
+            np.array(h_col, dtype=w.dtype, copy=False),
+            np.array(grad, dtype=w.dtype, copy=False),
+        )
 
     if NUMBA_AVAILABLE:
         return _arnoldi_numba(Q[:, :k], w.copy(), decay, k)
