@@ -8,9 +8,11 @@
   },
   "dataset": {
     "dataset_name": "ylacombe/google-colombian-spanish",
+    "dataset_subset": "female",
     "dataset_split": "train",
     "sample_rate": 16000,
-    "max_clips": 32,
+    "max_clips": 4,
+    "streaming": true,
     "window": 16,
     "batch_size": 4,
     "stride": 1,
